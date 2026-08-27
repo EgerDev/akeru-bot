@@ -7,10 +7,12 @@ import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import {
   ApprovalRequestId,
+  BotId,
   CheckpointRef,
   ClientSurface,
   CommandId,
   EventId,
+  GroupId,
   IsoDateTime,
   MessageId,
   NonNegativeInt,
@@ -23,6 +25,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { McpServer, McpServerId, McpServerUrl } from "./mcpServer.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -261,6 +264,93 @@ export const OrchestrationProject = Schema.Struct({
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
+export const BotAvatar = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("blob"),
+    shape: Schema.Literals([
+      "circle",
+      "squircle",
+      "square",
+      "pill",
+      "triangle",
+      "hex",
+      "cloud",
+      "drop",
+    ]),
+    color: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("dither"),
+    seed: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("image"),
+    assetPath: Schema.String,
+    dithered: Schema.Boolean,
+  }),
+]);
+export type BotAvatar = typeof BotAvatar.Type;
+
+export const BotEngine = Schema.Struct({
+  provider: TrimmedNonEmptyString,
+  model: TrimmedNonEmptyString,
+});
+export type BotEngine = typeof BotEngine.Type;
+
+export const BotSandbox = Schema.Literals(["local", "vercel", "akeru-cloud", "upstash"]);
+export type BotSandbox = typeof BotSandbox.Type;
+
+export const BotUsageCap = Schema.Struct({
+  unit: Schema.Literal("tokens"),
+  limit: Schema.Int.check(Schema.isGreaterThan(0)),
+});
+export type BotUsageCap = typeof BotUsageCap.Type;
+
+export const OrchestrationBot = Schema.Struct({
+  id: BotId,
+  name: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  label: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  description: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  disabledMcpServerIds: Schema.Array(McpServerId).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  avatar: BotAvatar,
+  engine: Schema.NullOr(BotEngine),
+  sandbox: Schema.NullOr(BotSandbox),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  usageCap: Schema.NullOr(BotUsageCap).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  groupId: Schema.NullOr(GroupId),
+  archivedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationBot = typeof OrchestrationBot.Type;
+
+export const GroupMembershipRole = Schema.Literals(["boss", "specialist"]);
+export type GroupMembershipRole = typeof GroupMembershipRole.Type;
+
+export const GroupMembership = Schema.Struct({
+  botId: BotId,
+  role: GroupMembershipRole,
+});
+export type GroupMembership = typeof GroupMembership.Type;
+
+export const GROUP_SHARED_WORKSPACE_WARNING =
+  "Bots share this workspace. Anyone who can talk to a bot can reach anything the workspace can.";
+
+export const OrchestrationGroup = Schema.Struct({
+  id: GroupId,
+  name: TrimmedNonEmptyString,
+  bossBotId: Schema.NullOr(BotId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  members: Schema.Array(GroupMembership).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationGroup = typeof OrchestrationGroup.Type;
+
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
@@ -270,6 +360,7 @@ export const OrchestrationMessage = Schema.Struct({
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.NullOr(TurnId),
+  respondingBotId: Schema.optional(Schema.NullOr(BotId)),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -377,6 +468,7 @@ export const OrchestrationLatestTurn = Schema.Struct({
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
+  respondingBotId: Schema.optional(Schema.NullOr(BotId)),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
@@ -398,6 +490,9 @@ export type ThreadLinkedPullRequest = typeof ThreadLinkedPullRequest.Type;
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  botId: Schema.optional(Schema.NullOr(BotId)),
+  groupId: Schema.optional(Schema.NullOr(GroupId)),
+  respondingBotId: Schema.optional(Schema.NullOr(BotId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -451,6 +546,9 @@ export type OrchestrationThread = typeof OrchestrationThread.Type;
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
+  bots: Schema.Array(OrchestrationBot).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  groups: Schema.Array(OrchestrationGroup).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  mcpServers: Schema.optional(Schema.Array(McpServer)),
   threads: Schema.Array(OrchestrationThread),
   updatedAt: IsoDateTime,
 });
@@ -474,6 +572,9 @@ export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  botId: Schema.optional(Schema.NullOr(BotId)),
+  groupId: Schema.optional(Schema.NullOr(GroupId)),
+  respondingBotId: Schema.optional(Schema.NullOr(BotId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -529,6 +630,9 @@ export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
+  bots: Schema.Array(OrchestrationBot).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  groups: Schema.Array(OrchestrationGroup).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  mcpServers: Schema.optional(Schema.Array(McpServer)),
   threads: Schema.Array(OrchestrationThreadShell),
   updatedAt: IsoDateTime,
 });
@@ -544,6 +648,31 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("project-removed"),
     sequence: NonNegativeInt,
     projectId: ProjectId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("bot-upserted"),
+    sequence: NonNegativeInt,
+    bot: OrchestrationBot,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("group-upserted"),
+    sequence: NonNegativeInt,
+    group: OrchestrationGroup,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("group-removed"),
+    sequence: NonNegativeInt,
+    groupId: GroupId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("mcp-server-upserted"),
+    sequence: NonNegativeInt,
+    mcpServer: McpServer,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("mcp-server-removed"),
+    sequence: NonNegativeInt,
+    mcpServerId: McpServerId,
   }),
   Schema.Struct({
     kind: Schema.Literal("thread-upserted"),
@@ -693,11 +822,170 @@ const ProjectDeleteCommand = Schema.Struct({
   force: Schema.optional(Schema.Boolean),
 });
 
+const BotCreateCommand = Schema.Struct({
+  type: Schema.Literal("bot.create"),
+  commandId: CommandId,
+  botId: BotId,
+  name: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  label: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  disabledMcpServerIds: Schema.optional(Schema.Array(McpServerId)),
+  avatar: BotAvatar,
+  engine: Schema.NullOr(BotEngine),
+  sandbox: Schema.NullOr(BotSandbox),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  usageCap: Schema.NullOr(BotUsageCap).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  groupId: Schema.NullOr(GroupId),
+  createdAt: IsoDateTime,
+});
+
+const BotUpdateCommand = Schema.Struct({
+  type: Schema.Literal("bot.update"),
+  commandId: CommandId,
+  botId: BotId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  title: Schema.optional(TrimmedNonEmptyString),
+  label: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  disabledMcpServerIds: Schema.optional(Schema.Array(McpServerId)),
+  avatar: Schema.optional(BotAvatar),
+  engine: Schema.optional(Schema.NullOr(BotEngine)),
+  sandbox: Schema.optional(Schema.NullOr(BotSandbox)),
+  runtimeMode: Schema.optional(RuntimeMode),
+  usageCap: Schema.optional(Schema.NullOr(BotUsageCap)),
+  groupId: Schema.optional(Schema.NullOr(GroupId)),
+});
+
+const BotArchiveCommand = Schema.Struct({
+  type: Schema.Literal("bot.archive"),
+  commandId: CommandId,
+  botId: BotId,
+});
+
+const BotRestoreCommand = Schema.Struct({
+  type: Schema.Literal("bot.restore"),
+  commandId: CommandId,
+  botId: BotId,
+});
+
+const GroupCreateCommand = Schema.Struct({
+  type: Schema.Literal("group.create"),
+  commandId: CommandId,
+  groupId: GroupId,
+  name: TrimmedNonEmptyString,
+  // Optional at the wire boundary so the decider returns the domain-specific
+  // missing-boss rejection instead of a generic schema failure.
+  bossBotId: Schema.optional(BotId),
+  specialistBotIds: Schema.optional(Schema.Array(BotId)),
+  createdAt: IsoDateTime,
+});
+
+const GroupRenameCommand = Schema.Struct({
+  type: Schema.Literal("group.rename"),
+  commandId: CommandId,
+  groupId: GroupId,
+  name: TrimmedNonEmptyString,
+});
+
+const GroupDeleteCommand = Schema.Struct({
+  type: Schema.Literal("group.delete"),
+  commandId: CommandId,
+  groupId: GroupId,
+});
+
+const GroupMemberAssignCommand = Schema.Struct({
+  type: Schema.Literal("group.member.assign"),
+  commandId: CommandId,
+  groupId: GroupId,
+  botId: BotId,
+  role: GroupMembershipRole,
+});
+
+const GroupMemberUnassignCommand = Schema.Struct({
+  type: Schema.Literal("group.member.unassign"),
+  commandId: CommandId,
+  groupId: GroupId,
+  botId: BotId,
+});
+
+const GroupBossSetCommand = Schema.Struct({
+  type: Schema.Literal("group.boss.set"),
+  commandId: CommandId,
+  groupId: GroupId,
+  bossBotId: BotId,
+  // This makes boss replacement and removal of the old boss one atomic
+  // command. Without it, the old boss remains a specialist.
+  unassignPreviousBoss: Schema.optional(Schema.Boolean),
+});
+
+const McpServerCreateCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("mcp-server.create"),
+    commandId: CommandId,
+    mcpServerId: McpServerId,
+    name: TrimmedNonEmptyString,
+    transport: Schema.Literal("stdio"),
+    command: TrimmedNonEmptyString,
+    args: Schema.optional(Schema.Array(Schema.String)),
+    createdAt: IsoDateTime,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("mcp-server.create"),
+    commandId: CommandId,
+    mcpServerId: McpServerId,
+    name: TrimmedNonEmptyString,
+    transport: Schema.Literal("url"),
+    url: McpServerUrl,
+    createdAt: IsoDateTime,
+  }),
+]);
+
+const McpServerUpdateCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("mcp-server.update"),
+    commandId: CommandId,
+    mcpServerId: McpServerId,
+    name: TrimmedNonEmptyString,
+    transport: Schema.Literal("stdio"),
+    command: TrimmedNonEmptyString,
+    args: Schema.optional(Schema.Array(Schema.String)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("mcp-server.update"),
+    commandId: CommandId,
+    mcpServerId: McpServerId,
+    name: TrimmedNonEmptyString,
+    transport: Schema.Literal("url"),
+    url: McpServerUrl,
+  }),
+]);
+
+const McpServerDeleteCommand = Schema.Struct({
+  type: Schema.Literal("mcp-server.delete"),
+  commandId: CommandId,
+  mcpServerId: McpServerId,
+});
+
+const McpServerEnableCommand = Schema.Struct({
+  type: Schema.Literal("mcp-server.enable"),
+  commandId: CommandId,
+  mcpServerId: McpServerId,
+});
+
+const McpServerDisableCommand = Schema.Struct({
+  type: Schema.Literal("mcp-server.disable"),
+  commandId: CommandId,
+  mcpServerId: McpServerId,
+});
+
 const ThreadCreateCommand = Schema.Struct({
   type: Schema.Literal("thread.create"),
   commandId: CommandId,
   threadId: ThreadId,
   projectId: ProjectId,
+  botId: Schema.optional(Schema.NullOr(BotId)),
+  groupId: Schema.optional(Schema.NullOr(GroupId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -707,7 +995,12 @@ const ThreadCreateCommand = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
-});
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      input.botId == null || input.groupId == null || "thread cannot belong to a bot and group",
+  ),
+);
 
 const ThreadDeleteCommand = Schema.Struct({
   type: Schema.Literal("thread.delete"),
@@ -828,6 +1121,8 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
 
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
+  botId: Schema.optional(Schema.NullOr(BotId)),
+  groupId: Schema.optional(Schema.NullOr(GroupId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -835,7 +1130,12 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
-});
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      input.botId == null || input.groupId == null || "thread cannot belong to a bot and group",
+  ),
+);
 
 const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
   projectCwd: TrimmedNonEmptyString,
@@ -870,6 +1170,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  respondingBotId: Schema.optional(BotId),
   createdAt: IsoDateTime,
 });
 
@@ -889,6 +1190,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  respondingBotId: Schema.optional(BotId),
   createdAt: IsoDateTime,
 });
 
@@ -943,6 +1245,21 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  BotCreateCommand,
+  BotUpdateCommand,
+  BotArchiveCommand,
+  BotRestoreCommand,
+  GroupCreateCommand,
+  GroupRenameCommand,
+  GroupDeleteCommand,
+  GroupMemberAssignCommand,
+  GroupMemberUnassignCommand,
+  GroupBossSetCommand,
+  McpServerCreateCommand,
+  McpServerUpdateCommand,
+  McpServerDeleteCommand,
+  McpServerEnableCommand,
+  McpServerDisableCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -971,6 +1288,21 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  BotCreateCommand,
+  BotUpdateCommand,
+  BotArchiveCommand,
+  BotRestoreCommand,
+  GroupCreateCommand,
+  GroupRenameCommand,
+  GroupDeleteCommand,
+  GroupMemberAssignCommand,
+  GroupMemberUnassignCommand,
+  GroupBossSetCommand,
+  McpServerCreateCommand,
+  McpServerUpdateCommand,
+  McpServerDeleteCommand,
+  McpServerEnableCommand,
+  McpServerDisableCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -1089,6 +1421,21 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "bot.created",
+  "bot.updated",
+  "bot.archived",
+  "bot.restored",
+  "group.created",
+  "group.renamed",
+  "group.deleted",
+  "group.member-assigned",
+  "group.member-unassigned",
+  "group.boss-set",
+  "mcp-server.created",
+  "mcp-server.updated",
+  "mcp-server.deleted",
+  "mcp-server.enabled",
+  "mcp-server.disabled",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -1118,7 +1465,13 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals([
+  "project",
+  "bot",
+  "group",
+  "mcp-server",
+  "thread",
+]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -1152,9 +1505,121 @@ export const ProjectDeletedPayload = Schema.Struct({
   deletedAt: IsoDateTime,
 });
 
+export const BotCreatedPayload = Schema.Struct({
+  botId: BotId,
+  name: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  label: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  description: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  disabledMcpServerIds: Schema.Array(McpServerId).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  avatar: BotAvatar,
+  engine: Schema.NullOr(BotEngine),
+  sandbox: Schema.NullOr(BotSandbox),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  usageCap: Schema.NullOr(BotUsageCap).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  groupId: Schema.NullOr(GroupId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const BotUpdatedPayload = Schema.Struct({
+  botId: BotId,
+  name: Schema.optional(TrimmedNonEmptyString),
+  title: Schema.optional(TrimmedNonEmptyString),
+  label: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  disabledMcpServerIds: Schema.optional(Schema.Array(McpServerId)),
+  avatar: Schema.optional(BotAvatar),
+  engine: Schema.optional(Schema.NullOr(BotEngine)),
+  sandbox: Schema.optional(Schema.NullOr(BotSandbox)),
+  runtimeMode: Schema.optional(RuntimeMode),
+  usageCap: Schema.optional(Schema.NullOr(BotUsageCap)),
+  groupId: Schema.optional(Schema.NullOr(GroupId)),
+  updatedAt: IsoDateTime,
+});
+
+export const BotArchivedPayload = Schema.Struct({
+  botId: BotId,
+  archivedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const BotRestoredPayload = Schema.Struct({
+  botId: BotId,
+  updatedAt: IsoDateTime,
+});
+
+export const GroupCreatedPayload = Schema.Struct({
+  groupId: GroupId,
+  name: TrimmedNonEmptyString,
+  // Defaults keep pre-membership group.created events replayable.
+  bossBotId: Schema.NullOr(BotId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  members: Schema.Array(GroupMembership).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const GroupRenamedPayload = Schema.Struct({
+  groupId: GroupId,
+  name: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+export const GroupDeletedPayload = Schema.Struct({
+  groupId: GroupId,
+  deletedAt: IsoDateTime,
+});
+
+export const GroupMemberAssignedPayload = Schema.Struct({
+  groupId: GroupId,
+  member: GroupMembership,
+  updatedAt: IsoDateTime,
+});
+
+export const GroupMemberUnassignedPayload = Schema.Struct({
+  groupId: GroupId,
+  botId: BotId,
+  updatedAt: IsoDateTime,
+});
+
+export const GroupBossSetPayload = Schema.Struct({
+  groupId: GroupId,
+  bossBotId: BotId,
+  previousBossBotId: Schema.NullOr(BotId),
+  previousBossRole: Schema.NullOr(Schema.Literals(["specialist", "unassigned"])),
+  updatedAt: IsoDateTime,
+});
+
+export const McpServerCreatedPayload = Schema.Struct({
+  mcpServer: McpServer,
+});
+
+export const McpServerUpdatedPayload = Schema.Struct({
+  mcpServer: McpServer,
+});
+
+export const McpServerDeletedPayload = Schema.Struct({
+  mcpServerId: McpServerId,
+  deletedAt: IsoDateTime,
+});
+
+export const McpServerEnabledPayload = Schema.Struct({
+  mcpServer: McpServer,
+});
+
+export const McpServerDisabledPayload = Schema.Struct({
+  mcpServer: McpServer,
+});
+
 export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
+  botId: Schema.optional(Schema.NullOr(BotId)),
+  groupId: Schema.optional(Schema.NullOr(GroupId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
@@ -1270,6 +1735,7 @@ export const ThreadMessageSentPayload = Schema.Struct({
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.NullOr(TurnId),
+  respondingBotId: Schema.optional(Schema.NullOr(BotId)),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1285,6 +1751,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  respondingBotId: Schema.optional(Schema.NullOr(BotId)),
   createdAt: IsoDateTime,
 });
 
@@ -1376,7 +1843,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, BotId, GroupId, McpServerId, ThreadId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -1399,6 +1866,81 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("bot.created"),
+    payload: BotCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("bot.updated"),
+    payload: BotUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("bot.archived"),
+    payload: BotArchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("bot.restored"),
+    payload: BotRestoredPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("group.created"),
+    payload: GroupCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("group.renamed"),
+    payload: GroupRenamedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("group.deleted"),
+    payload: GroupDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("group.member-assigned"),
+    payload: GroupMemberAssignedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("group.member-unassigned"),
+    payload: GroupMemberUnassignedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("group.boss-set"),
+    payload: GroupBossSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mcp-server.created"),
+    payload: McpServerCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mcp-server.updated"),
+    payload: McpServerUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mcp-server.deleted"),
+    payload: McpServerDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mcp-server.enabled"),
+    payload: McpServerEnabledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("mcp-server.disabled"),
+    payload: McpServerDisabledPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

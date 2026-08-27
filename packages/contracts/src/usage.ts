@@ -15,6 +15,7 @@
 import * as Schema from "effect/Schema";
 
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { SubscriptionProviderId } from "./subscriptionAuth.ts";
 
 /**
  * Bumped whenever the shape of {@link UsageSummary} changes incompatibly. The
@@ -160,6 +161,31 @@ export const UsagePricing = Schema.Struct({
 });
 export type UsagePricing = typeof UsagePricing.Type;
 
+export const UsagePlanWindowKind = Schema.Literals(["session", "weekly", "model"]);
+export type UsagePlanWindowKind = typeof UsagePlanWindowKind.Type;
+
+/** One subscription window, as a percent used of that cap. */
+export const UsagePlanWindow = Schema.Struct({
+  kind: UsagePlanWindowKind,
+  label: TrimmedNonEmptyString,
+  usedPercent: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.String),
+});
+export type UsagePlanWindow = typeof UsagePlanWindow.Type;
+
+export const UsagePlanLimitsStatus = Schema.Literals(["ok", "failed"]);
+export type UsagePlanLimitsStatus = typeof UsagePlanLimitsStatus.Type;
+
+/** Live plan meters for one Settings → Providers login. */
+export const UsageProviderPlanLimits = Schema.Struct({
+  provider: SubscriptionProviderId,
+  status: UsagePlanLimitsStatus,
+  plan: Schema.NullOr(TrimmedNonEmptyString),
+  message: Schema.NullOr(TrimmedNonEmptyString),
+  windows: Schema.Array(UsagePlanWindow),
+});
+export type UsageProviderPlanLimits = typeof UsageProviderPlanLimits.Type;
+
 export const UsageSummaryInput = Schema.Struct({
   /** Inclusive first day of the window, in `timeZone`. */
   sinceDay: UsageDay,
@@ -190,6 +216,8 @@ export const UsageSummary = Schema.Struct({
   pricing: UsagePricing,
   /** Wall-clock cost of the scan, surfaced in diagnostics. */
   scanDurationMs: NonNegativeInt,
+  /** Live Claude and Codex plan windows. Absent on older servers. */
+  planLimits: Schema.optional(Schema.Array(UsageProviderPlanLimits)),
 });
 export type UsageSummary = typeof UsageSummary.Type;
 

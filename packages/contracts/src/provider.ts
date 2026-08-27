@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { McpServer, McpServerId } from "./mcpServer.ts";
 import {
   ApprovalRequestId,
   EventId,
@@ -9,6 +10,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import {
+  BotSandbox,
   ChatAttachment,
   ModelSelection,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -43,6 +45,7 @@ export const ProviderSession = Schema.Struct({
   model: Schema.optional(TrimmedNonEmptyString),
   threadId: ThreadId,
   resumeCursor: Schema.optional(Schema.Unknown),
+  mcpServerIds: Schema.optional(Schema.Array(McpServerId)),
   activeTurnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -61,6 +64,8 @@ export const ProviderSessionStartInput = Schema.Struct({
   resumeCursor: Schema.optional(Schema.Unknown),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
+  botSandbox: Schema.optional(Schema.NullOr(BotSandbox)),
+  mcpServers: Schema.optional(Schema.Array(McpServer)),
   runtimeMode: RuntimeMode,
 });
 export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;

@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
+  BotAvatar,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ClientOrchestrationCommand,
@@ -29,6 +30,7 @@ import {
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
+const decodeBotAvatar = Schema.decodeUnknownEffect(BotAvatar);
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
@@ -58,6 +60,27 @@ const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationComma
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
 const decodeDispatchCommandError = Schema.decodeUnknownEffect(OrchestrationDispatchCommandError);
+
+it.effect("decodes every bot avatar variant", () =>
+  Effect.gen(function* () {
+    assert.deepEqual(
+      [
+        yield* decodeBotAvatar({ kind: "blob", shape: "squircle", color: "#7357ff" }),
+        yield* decodeBotAvatar({ kind: "dither", seed: "scout" }),
+        yield* decodeBotAvatar({
+          kind: "image",
+          assetPath: "bots/scout.png",
+          dithered: true,
+        }),
+      ],
+      [
+        { kind: "blob", shape: "squircle", color: "#7357ff" },
+        { kind: "dither", seed: "scout" },
+        { kind: "image", assetPath: "bots/scout.png", dithered: true },
+      ],
+    );
+  }),
+);
 
 it.effect("decodes a dispatch error after its bootstrap thread was deleted", () =>
   Effect.gen(function* () {
@@ -352,6 +375,44 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
   }),
 );
 
+it.effect("rejects dual ownership in thread.turn.start bootstrap", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.result(
+      decodeThreadTurnStartCommand({
+        type: "thread.turn.start",
+        commandId: "cmd-turn-bootstrap-dual-owner",
+        threadId: "thread-dual-owner",
+        message: {
+          messageId: "msg-bootstrap-dual-owner",
+          role: "user",
+          text: "hello",
+          attachments: [],
+        },
+        bootstrap: {
+          createThread: {
+            projectId: "project-1",
+            botId: "bot-1",
+            groupId: "group-1",
+            title: "Invalid bootstrap thread",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.4",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.equal(result._tag, "Failure");
+  }),
+);
+
 it.effect("decodes thread.created runtime mode for historical events", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadCreatedPayload({
@@ -393,6 +454,35 @@ it.effect("decodes thread.meta-updated payloads with explicit provider", () =>
     assert.strictEqual(parsed.previousTitle, "Previous title");
     assert.strictEqual(parsed.titleRegeneration?.requestId, "cmd-title-regenerate");
     assert.strictEqual(parsed.modelSelection?.instanceId, "claudeAgent");
+  }),
+);
+
+it.effect("decodes exclusive thread ownership", () =>
+  Effect.gen(function* () {
+    const base = {
+      type: "thread.create" as const,
+      commandId: "cmd-thread-owner",
+      threadId: "thread-owned",
+      projectId: "project-1",
+      title: "Owned thread",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+      branch: null,
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const owned = yield* decodeOrchestrationCommand({ ...base, botId: "bot-1" });
+    assert.equal(owned.type, "thread.create");
+    if (owned.type === "thread.create") {
+      assert.equal(owned.botId, "bot-1");
+      assert.equal(owned.groupId, undefined);
+    }
+
+    const invalid = yield* Effect.result(
+      decodeOrchestrationCommand({ ...base, botId: "bot-1", groupId: "group-1" }),
+    );
+    assert.equal(invalid._tag, "Failure");
   }),
 );
 

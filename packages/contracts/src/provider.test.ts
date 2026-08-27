@@ -43,10 +43,21 @@ describe("ProviderSessionStartInput", () => {
       runtimeMode: "full-access",
     });
     expect(parsed.runtimeMode).toBe("full-access");
+    expect(parsed.botSandbox).toBeUndefined();
     expect(parsed.modelSelection?.instanceId).toBe("codex");
     expect(parsed.modelSelection?.model).toBe("gpt-5.3-codex");
     expect(getOptionValue(parsed.modelSelection?.options, "reasoningEffort")).toBe("high");
     expect(getOptionValue(parsed.modelSelection?.options, "fastMode")).toBe(true);
+  });
+
+  it("accepts a bot sandbox provider", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "codex",
+      botSandbox: "vercel",
+      runtimeMode: "full-access",
+    });
+    expect(parsed.botSandbox).toBe("vercel");
   });
 
   it("rejects payloads without runtime mode", () => {
