@@ -10,6 +10,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
+- [Subscription provider](#subscription-provider)
 - [Checkpointing](#checkpointing)
 
 ## Concepts
@@ -88,9 +89,13 @@ A typed signal emitted when an async milestone completes, such as `checkpoint.ba
 
 "Quiesced" means a turn has gone quiet and stable: follow-up work such as [CheckpointReactor.ts][6] has settled. It appears in [the receipt schema][13], so in practice it is something tests wait on rather than a production signal.
 
-### Provider runtime
+### Subscription provider
 
-The live backend agent implementation and its event stream. The main service is [ProviderService.ts][14], the adapter contract is [ProviderAdapter.ts][15], and the overview is in [providers.md][16].
+A consumer AI account that a user connects through OAuth, such as ChatGPT, Claude, Cursor, Grok, or Kimi For Coding. The environment server stores the credential and gives a run only the short-lived access token it needs. See [subscription authentication](./subscription-auth.md).
+
+## Provider runtime
+
+The live backend agent implementation and its event stream. Desktop turns cross [AgentController][25]. Codex uses Akeru's memory-free Mastra Core controller, custom workspace and MCP tools, an explicit subscription `AuthStorage`, and normalized Mastra runtime events. Claude, Cursor, Grok, and OpenCode keep their existing adapters behind the legacy bridge. The adapter contract is [ProviderAdapter.ts][15], and the overview is in [providers.md][16].
 
 #### Provider
 
@@ -183,3 +188,4 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
+[25]: ../../apps/server/src/provider/Services/AgentController.ts

@@ -36,6 +36,22 @@ Two registries separate configuration from live processes:
 [`ProviderService`][service] sits on top. It combines the adapter registry with the provider session
 directory to route session and turn operations for a thread, so callers name a thread, not an agent.
 
+Desktop chat does not call `ProviderService` directly from orchestration. The command reactor calls
+Akeru's [`AgentController`][controller]. Codex threads run through Akeru's custom Mastra Core
+controller and call `Session.sendMessage()`. The backing coding agent has no Mastra memory or task
+signals. Akeru builds its workspace and MCP tools per thread, and resolves the selected Codex model
+through an explicit subscription `AuthStorage`. AgentController maps Mastra message, tool, approval,
+usage, completion, and error events to `ProviderRuntimeEvent`.
+
+Claude, Cursor, Grok, and OpenCode keep their existing adapters. [`LegacyProviderBridge`][bridge]
+routes those providers through `ProviderService` and forwards their canonical runtime events. It is
+not the Codex turn path and AgentController never falls back to the legacy Codex loop when a Mastra
+session is absent.
+
+`BotEngine.provider` stores the selected provider instance ID. AgentController keeps that instance
+when it creates a runtime session, so selecting a model keeps the subscription and custom instance
+that supplied it. Runtime ingestion reads the merged Mastra and adapter event stream once.
+
 Adding a driver means writing the driver plus adapter and adding it to `BUILT_IN_DRIVERS`. No
 orchestration, contract, or client change is required for the common case.
 
@@ -97,6 +113,8 @@ when a request opens (approval) or user input is requested, via
 [instances]: ../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts
 [registry]: ../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts
 [service]: ../../apps/server/src/provider/Layers/ProviderService.ts
+[controller]: ../../apps/server/src/provider/Layers/AgentController.ts
+[bridge]: ../../apps/server/src/provider/Layers/LegacyProviderBridge.ts
 [contracts]: ../../packages/contracts/src/orchestration.ts
 [worker]: ../../packages/shared/src/DrainableWorker.ts
 [ingest]: ../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
