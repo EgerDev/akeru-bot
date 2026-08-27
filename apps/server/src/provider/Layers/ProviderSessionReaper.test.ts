@@ -1,12 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import {
-  ProjectId,
-  ThreadId,
-  TurnId,
-  ProviderDriverKind,
-  ProviderInstanceId,
-} from "@t3tools/contracts";
-import * as Clock from "effect/Clock";
+import { ProjectId, ThreadId, TurnId, ProviderInstanceId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -14,15 +7,14 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import * as ProviderSessionRuntime from "../../persistence/ProviderSessionRuntime.ts";
 import { ProviderValidationError } from "../Errors.ts";
+import { AgentController, type AgentControllerShape } from "../Services/AgentController.ts";
 import { ProviderSessionReaper } from "../Services/ProviderSessionReaper.ts";
-import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import { makeProviderSessionReaperLive } from "./ProviderSessionReaper.ts";
 
@@ -31,30 +23,9 @@ const defaultModelSelection = {
   model: "gpt-5-codex",
 } as const;
 
-async function waitFor(
-  predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 2_000,
-): Promise<void> {
-  const deadline = (await Effect.runPromise(Clock.currentTimeMillis)) + timeoutMs;
-  const poll = async (): Promise<void> => {
-    if (await predicate()) {
-      return;
-    }
-    if ((await Effect.runPromise(Clock.currentTimeMillis)) >= deadline) {
-      throw new Error("Timed out waiting for expectation.");
-    }
-    await Effect.runPromise(Effect.yieldNow);
-    return poll();
-  };
-
-  return poll();
-}
-
 const drainFibers = Effect.forEach(Array.from({ length: 10 }), () => Effect.yieldNow, {
   discard: true,
 });
-
-const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
 
 function makeReadModel(
   threads: ReadonlyArray<{
@@ -149,44 +120,27 @@ describe("ProviderSessionReaper", () => {
     readonly readModel: ReturnType<typeof makeReadModel>;
     readonly stopSessionImplementation?: (input: {
       readonly threadId: ThreadId;
-    }) => ReturnType<ProviderServiceShape["stopSession"]>;
+    }) => ReturnType<AgentControllerShape["stopSession"]>;
   }) {
     const stoppedThreadIds = new Set<ThreadId>();
-    const stopSession = vi.fn<ProviderServiceShape["stopSession"]>(
-      (request) =>
-        (input.stopSessionImplementation
-          ? input.stopSessionImplementation(request)
-          : Effect.sync(() => {
-              stoppedThreadIds.add(request.threadId);
-            })) as ReturnType<ProviderServiceShape["stopSession"]>,
-    );
-
-    const providerService: ProviderServiceShape = {
-      startSession: () => unsupported(),
-      sendTurn: () => unsupported(),
-      interruptTurn: () => unsupported(),
-      respondToRequest: () => unsupported(),
-      respondToUserInput: () => unsupported(),
-      stopSession,
-      listSessions: () => Effect.succeed([]),
-      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
-      getInstanceInfo: (instanceId) => {
-        const driverKind = ProviderDriverKind.make(String(instanceId));
-        return Effect.succeed({
-          instanceId,
-          driverKind,
-          displayName: undefined,
-          enabled: true,
-          continuationIdentity: {
-            driverKind,
-            continuationKey: `${driverKind}:instance:${instanceId}`,
-          },
-        });
-      },
-      rollbackConversation: () => unsupported(),
-      uploadFeedback: () => unsupported(),
-      streamEvents: Stream.empty,
-    };
+    const stopWaiters = new Map<number, () => void>();
+    const stopSession = vi.fn<AgentControllerShape["stopSession"]>((request) => {
+      const operation = input.stopSessionImplementation
+        ? input.stopSessionImplementation(request)
+        : Effect.sync(() => stoppedThreadIds.add(request.threadId));
+      return operation.pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            for (const [count, resolve] of stopWaiters) {
+              if (stopSession.mock.calls.length >= count) {
+                stopWaiters.delete(count);
+                resolve();
+              }
+            }
+          }),
+        ),
+      ) as ReturnType<AgentControllerShape["stopSession"]>;
+    });
 
     const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
       Layer.provide(SqlitePersistenceMemory),
@@ -200,7 +154,7 @@ describe("ProviderSessionReaper", () => {
     }).pipe(
       Layer.provideMerge(providerSessionDirectoryLayer),
       Layer.provideMerge(runtimeRepositoryLayer),
-      Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
+      Layer.provideMerge(Layer.mock(AgentController)({ stopSession })),
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
           getCommandReadModel: () => Effect.die("unused"),
@@ -229,11 +183,18 @@ describe("ProviderSessionReaper", () => {
       Layer.provideMerge(NodeServices.layer),
     );
 
+    const waitForStopCount = (count: number) => {
+      if (stopSession.mock.calls.length >= count) {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => stopWaiters.set(count, resolve));
+    };
+
     runtime = ManagedRuntime.make(layer);
-    return { stopSession, stoppedThreadIds };
+    return { stopSession, stoppedThreadIds, waitForStopCount };
   }
 
-  it("reaps stale persisted sessions without active turns", async () => {
+  it("reaps an idle session through AgentController stop", async () => {
     const threadId = ThreadId.make("thread-reaper-stale");
     const now = "2026-01-01T00:00:00.000Z";
     const harness = await createHarness({
@@ -274,7 +235,7 @@ describe("ProviderSessionReaper", () => {
 
     await startReaper();
 
-    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+    await harness.waitForStopCount(1);
 
     expect(harness.stopSession.mock.calls[0]?.[0]).toEqual({ threadId });
     expect(harness.stoppedThreadIds.has(threadId)).toBe(true);
@@ -548,7 +509,7 @@ describe("ProviderSessionReaper", () => {
 
     await startReaper();
 
-    await waitFor(() => harness.stopSession.mock.calls.length === 2);
+    await harness.waitForStopCount(2);
 
     expect(harness.stopSession.mock.calls.map(([request]) => request.threadId)).toEqual([
       failedThreadId,
@@ -629,7 +590,7 @@ describe("ProviderSessionReaper", () => {
 
     await startReaper();
 
-    await waitFor(() => harness.stopSession.mock.calls.length === 2);
+    await harness.waitForStopCount(2);
 
     expect(harness.stopSession.mock.calls.map(([request]) => request.threadId)).toEqual([
       defectThreadId,

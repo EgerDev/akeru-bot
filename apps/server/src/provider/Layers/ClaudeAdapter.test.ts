@@ -394,24 +394,38 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("uses bypass permissions for full-access claude sessions", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
+  it.effect(
+    "uses bypass permissions and general Akeru instructions for full-access claude sessions",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
 
-      const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.permissionMode, "bypassPermissions");
-      assert.equal(createInput?.options.allowDangerouslySkipPermissions, true);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
+        const createInput = harness.getLastCreateQueryInput();
+        assert.equal(createInput?.options.permissionMode, "bypassPermissions");
+        assert.equal(createInput?.options.allowDangerouslySkipPermissions, true);
+        assert.deepInclude(createInput?.options.systemPrompt, {
+          type: "preset",
+          preset: "claude_code",
+        });
+        assert.include(
+          typeof createInput?.options.systemPrompt === "object" &&
+            "append" in createInput.options.systemPrompt
+            ? (createInput.options.systemPrompt.append ?? "")
+            : "",
+          "general-purpose assistant",
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("passes the configured auto-compaction window to Claude", () => {
     const harness = makeHarness({ claudeConfig: { autoCompactWindow: "300000" } });

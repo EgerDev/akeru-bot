@@ -187,6 +187,33 @@ export class ProviderSessionDirectoryPersistenceError extends Schema.TaggedError
   }
 }
 
+export class AgentControllerUnsupportedEngineError extends Schema.TaggedErrorClass<AgentControllerUnsupportedEngineError>()(
+  "AgentControllerUnsupportedEngineError",
+  {
+    provider: Schema.String,
+    model: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `AgentController cannot resolve engine '${this.provider}/${this.model}': ${this.detail}`;
+  }
+}
+
+export class AgentControllerRuntimeError extends Schema.TaggedErrorClass<AgentControllerRuntimeError>()(
+  "AgentControllerRuntimeError",
+  {
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `AgentController failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
 export type ProviderAdapterError =
   | ProviderAdapterValidationError
   | ProviderAdapterSessionNotFoundError
@@ -202,3 +229,8 @@ export type ProviderServiceError =
   | ProviderSessionDirectoryPersistenceError
   | ProviderAdapterError
   | CheckpointServiceError;
+
+export type AgentControllerError =
+  | AgentControllerUnsupportedEngineError
+  | AgentControllerRuntimeError
+  | ProviderServiceError;

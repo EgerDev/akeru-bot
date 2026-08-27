@@ -1231,6 +1231,27 @@ export function makeOpenCodeAdapter(
                 directory,
                 ...(server.external && serverPassword ? { serverPassword } : {}),
               });
+              yield* Effect.forEach(
+                input.mcpServers ?? [],
+                (mcpServer) =>
+                  runOpenCodeSdk("mcp.add", () =>
+                    client.mcp.add({
+                      name: String(mcpServer.id),
+                      config:
+                        mcpServer.transport === "url"
+                          ? {
+                              type: "remote",
+                              url: mcpServer.url,
+                              oauth: false,
+                            }
+                          : {
+                              type: "local",
+                              command: [mcpServer.command, ...(mcpServer.args ?? [])],
+                            },
+                    }),
+                  ),
+                { discard: true },
+              );
               const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
               if (mcpSession && !server.external) {
                 yield* runOpenCodeSdk("mcp.add", () =>
