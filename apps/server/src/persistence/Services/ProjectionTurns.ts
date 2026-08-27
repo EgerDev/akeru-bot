@@ -7,6 +7,7 @@
  * @module ProjectionTurnRepository
  */
 import {
+  BotId,
   CheckpointRef,
   IsoDateTime,
   MessageId,
@@ -40,6 +41,7 @@ export const ProjectionTurn = Schema.Struct({
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   assistantMessageId: Schema.NullOr(MessageId),
+  respondingBotId: Schema.NullOr(BotId),
   state: ProjectionTurnState,
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
@@ -58,6 +60,7 @@ export const ProjectionTurnById = Schema.Struct({
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   assistantMessageId: Schema.NullOr(MessageId),
+  respondingBotId: Schema.NullOr(BotId),
   state: ProjectionTurnState,
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
@@ -72,6 +75,7 @@ export type ProjectionTurnById = typeof ProjectionTurnById.Type;
 export const ProjectionPendingTurnStart = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
+  respondingBotId: Schema.NullOr(BotId),
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   requestedAt: IsoDateTime,

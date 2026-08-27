@@ -297,6 +297,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         {
           id: ThreadId.make("thread-1"),
           projectId: asProjectId("project-1"),
+          botId: null,
+          groupId: null,
+          respondingBotId: null,
           title: "Thread 1",
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
@@ -319,6 +322,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             startedAt: "2026-02-24T00:00:08.000Z",
             completedAt: "2026-02-24T00:00:08.000Z",
             assistantMessageId: asMessageId("message-1"),
+            respondingBotId: null,
             sourceProposedPlan: {
               threadId: ThreadId.make("thread-1"),
               planId: "plan-1",
@@ -342,6 +346,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               role: "assistant",
               text: "hello from projection",
               turnId: asTurnId("turn-1"),
+              respondingBotId: null,
               streaming: false,
               createdAt: "2026-02-24T00:00:04.000Z",
               updatedAt: "2026-02-24T00:00:05.000Z",
@@ -423,6 +428,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         {
           id: ThreadId.make("thread-1"),
           projectId: asProjectId("project-1"),
+          botId: null,
+          groupId: null,
+          respondingBotId: null,
           title: "Thread 1",
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
@@ -445,6 +453,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             startedAt: "2026-02-24T00:00:08.000Z",
             completedAt: "2026-02-24T00:00:08.000Z",
             assistantMessageId: asMessageId("message-1"),
+            respondingBotId: null,
             sourceProposedPlan: {
               threadId: ThreadId.make("thread-1"),
               planId: "plan-1",
@@ -584,6 +593,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
         VALUES
           (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 4, '2026-04-06T00:00:07.000Z'),
+          (${ORCHESTRATION_PROJECTOR_NAMES.mcpServers}, 4, '2026-04-06T00:00:07.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threads}, 4, '2026-04-06T00:00:07.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threadMessages}, 4, '2026-04-06T00:00:07.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans}, 4, '2026-04-06T00:00:07.000Z'),
@@ -688,6 +698,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
         VALUES
           (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 4, '2026-04-06T00:00:07.000Z'),
+          (${ORCHESTRATION_PROJECTOR_NAMES.mcpServers}, 4, '2026-04-06T00:00:07.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threads}, 4, '2026-04-06T00:00:07.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threadMessages}, 4, '2026-04-06T00:00:07.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans}, 4, '2026-04-06T00:00:07.000Z'),
@@ -1437,6 +1448,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
         VALUES
           (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 3, '2026-04-03T00:00:40.000Z'),
+          (${ORCHESTRATION_PROJECTOR_NAMES.mcpServers}, 3, '2026-04-03T00:00:40.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threads}, 3, '2026-04-03T00:00:40.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threadMessages}, 3, '2026-04-03T00:00:40.000Z'),
           (${ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans}, 3, '2026-04-03T00:00:40.000Z'),

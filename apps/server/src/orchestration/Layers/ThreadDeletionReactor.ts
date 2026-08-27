@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
-import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { AgentController } from "../../provider/Services/AgentController.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
@@ -39,12 +39,12 @@ export const logCleanupCauseUnlessInterrupted = <R, E>({
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
-  const providerService = yield* ProviderService;
+  const agentController = yield* AgentController;
   const terminalManager = yield* TerminalManager.TerminalManager;
 
   const stopProviderSession = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
-      effect: providerService.stopSession({ threadId }),
+      effect: agentController.stopSession({ threadId }),
       message: "thread deletion cleanup skipped provider session stop",
       threadId,
     });

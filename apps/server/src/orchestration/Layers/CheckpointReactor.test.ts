@@ -52,9 +52,9 @@ import {
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
-  ProviderService,
-  type ProviderServiceShape,
-} from "../../provider/Services/ProviderService.ts";
+  AgentController,
+  type AgentControllerShape,
+} from "../../provider/Services/AgentController.ts";
 import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import { ServerConfig } from "../../config.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
@@ -76,7 +76,7 @@ type LegacyProviderRuntimeEvent = {
   readonly [key: string]: unknown;
 };
 
-function createProviderServiceHarness(
+function createAgentControllerHarness(
   cwd: string,
   hasSession = true,
   sessionCwd = cwd,
@@ -104,7 +104,9 @@ function createProviderServiceHarness(
           },
         ] satisfies ReadonlyArray<ProviderSession>)
       : Effect.succeed([] as ReadonlyArray<ProviderSession>);
-  const service: ProviderServiceShape = {
+  const service: AgentControllerShape = {
+    resolveEngine: () => unsupported(),
+    inspectEngine: () => unsupported(),
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
     interruptTurn: () => unsupported(),
@@ -112,18 +114,6 @@ function createProviderServiceHarness(
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
     listSessions,
-    getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
-    getInstanceInfo: (instanceId) =>
-      Effect.succeed({
-        instanceId,
-        driverKind: ProviderDriverKind.make(providerName),
-        displayName: undefined,
-        enabled: true,
-        continuationIdentity: {
-          driverKind: ProviderDriverKind.make(providerName),
-          continuationKey: `${providerName}:instance:${instanceId}`,
-        },
-      }),
     rollbackConversation,
     uploadFeedback: () => unsupported(),
     get streamEvents() {
@@ -289,7 +279,7 @@ describe("CheckpointReactor", () => {
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
-    const provider = createProviderServiceHarness(
+    const provider = createAgentControllerHarness(
       cwd,
       options?.hasSession ?? true,
       options?.providerSessionCwd ?? cwd,
@@ -339,7 +329,7 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(RuntimeReceiptBusLive),
-      Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(Layer.succeed(AgentController, provider.service)),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))),
       Layer.provideMerge(

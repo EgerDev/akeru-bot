@@ -38,9 +38,9 @@ import { OrchestrationEventStoreLive } from "../../persistence/Layers/Orchestrat
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import {
-  ProviderService,
-  type ProviderServiceShape,
-} from "../../provider/Services/ProviderService.ts";
+  AgentController,
+  type AgentControllerShape,
+} from "../../provider/Services/AgentController.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
@@ -97,12 +97,14 @@ function isLegacyTurnCompletedEvent(
   );
 }
 
-function createProviderServiceHarness() {
+function createAgentControllerHarness() {
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
   const runtimeSessions: ProviderSession[] = [];
 
   const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
-  const service: ProviderServiceShape = {
+  const service: AgentControllerShape = {
+    resolveEngine: () => unsupported(),
+    inspectEngine: () => unsupported(),
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
     interruptTurn: () => unsupported(),
@@ -110,20 +112,6 @@ function createProviderServiceHarness() {
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
     listSessions: () => Effect.succeed([...runtimeSessions]),
-    getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
-    getInstanceInfo: (instanceId) => {
-      const driverKind = ProviderDriverKind.make(String(instanceId));
-      return Effect.succeed({
-        instanceId,
-        driverKind,
-        displayName: undefined,
-        enabled: true,
-        continuationIdentity: {
-          driverKind,
-          continuationKey: `${driverKind}:instance:${instanceId}`,
-        },
-      });
-    },
     rollbackConversation: () => unsupported(),
     uploadFeedback: () => unsupported(),
     get streamEvents() {
@@ -229,7 +217,7 @@ describe("ProviderRuntimeIngestion", () => {
   }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     NodeFS.mkdirSync(NodePath.join(workspaceRoot, ".git"));
-    const provider = createProviderServiceHarness();
+    const provider = createAgentControllerHarness();
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
@@ -250,7 +238,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(ThreadBackgroundLiveness.layer),
       Layer.provideMerge(ThreadPlanProgress.layer),
       Layer.provideMerge(SqlitePersistenceMemory),
-      Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(Layer.succeed(AgentController, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),

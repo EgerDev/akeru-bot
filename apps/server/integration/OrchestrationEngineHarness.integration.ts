@@ -27,6 +27,7 @@ import * as CheckpointStore from "../src/checkpointing/CheckpointStore.ts";
 import { TextGeneration, type TextGenerationShape } from "../src/textGeneration/TextGeneration.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../src/persistence/Layers/OrchestrationEventStore.ts";
+import { ProjectionBotRepositoryLive } from "../src/persistence/Layers/ProjectionBots.ts";
 import { ProjectionCheckpointRepositoryLive } from "../src/persistence/Layers/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../src/persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
@@ -38,13 +39,14 @@ import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapte
 import { makeProviderRegistryLayer } from "../src/provider/testUtils/providerRegistryMock.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
 import { ServerSettingsService } from "../src/serverSettings.ts";
+import { AgentControllerLive } from "../src/provider/Layers/AgentController.ts";
+import { LegacyProviderBridgeLive } from "../src/provider/Layers/LegacyProviderBridge.ts";
 import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
 import { makeCodexAdapter } from "../src/provider/Layers/CodexAdapter.ts";
 import {
   NoOpProviderEventLoggers,
   ProviderEventLoggers,
 } from "../src/provider/Layers/ProviderEventLoggers.ts";
-import { ProviderService } from "../src/provider/Services/ProviderService.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
 import * as RepositoryIdentityResolver from "../src/project/RepositoryIdentityResolver.ts";
@@ -183,7 +185,6 @@ export interface OrchestrationIntegrationHarness {
   readonly adapterHarness: TestProviderAdapterHarness | null;
   readonly engine: OrchestrationEngineShape;
   readonly snapshotQuery: ProjectionSnapshotQuery["Service"];
-  readonly providerService: ProviderService["Service"];
   readonly checkpointStore: CheckpointStore.CheckpointStore["Service"];
   readonly checkpointRepository: ProjectionCheckpointRepository["Service"];
   readonly pendingApprovalRepository: ProjectionPendingApprovalRepository["Service"];
@@ -300,6 +301,8 @@ export const makeOrchestrationIntegrationHarness = (
           Layer.provide(AnalyticsService.layerTest),
           Layer.provide(providerEventLoggersLayer),
         );
+    const legacyProviderLayer = LegacyProviderBridgeLive.pipe(Layer.provide(providerLayer));
+    const agentControllerLayer = AgentControllerLive.pipe(Layer.provide(legacyProviderLayer));
     const providerRegistryLayer = makeProviderRegistryLayer();
 
     const checkpointStoreLayer = CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer));
@@ -307,10 +310,11 @@ export const makeOrchestrationIntegrationHarness = (
     const runtimeServicesLayer = Layer.mergeAll(
       projectionSnapshotQueryLayer,
       orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
+      ProjectionBotRepositoryLive,
       ProjectionCheckpointRepositoryLive,
       ProjectionPendingApprovalRepositoryLive,
       checkpointStoreLayer,
-      providerLayer,
+      agentControllerLayer,
       RuntimeReceiptBusTest,
     ).pipe(
       Layer.provideMerge(ThreadBackgroundLiveness.layer),
@@ -410,9 +414,6 @@ export const makeOrchestrationIntegrationHarness = (
     ).pipe(Effect.orDie);
     const snapshotQuery = yield* tryRuntimePromise("load ProjectionSnapshotQuery service", () =>
       runtime.runPromise(Effect.service(ProjectionSnapshotQuery)),
-    ).pipe(Effect.orDie);
-    const providerService = yield* tryRuntimePromise("load ProviderService service", () =>
-      runtime.runPromise(Effect.service(ProviderService)),
     ).pipe(Effect.orDie);
     const checkpointStore = yield* tryRuntimePromise("load CheckpointStore service", () =>
       runtime.runPromise(Effect.service(CheckpointStore.CheckpointStore)),
@@ -564,7 +565,6 @@ export const makeOrchestrationIntegrationHarness = (
       adapterHarness,
       engine,
       snapshotQuery,
-      providerService,
       checkpointStore,
       checkpointRepository,
       pendingApprovalRepository,

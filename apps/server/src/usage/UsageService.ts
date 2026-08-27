@@ -35,6 +35,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { SubscriptionAuthService } from "../subscription-auth/service.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
@@ -52,6 +53,7 @@ import {
   type ScanCache,
 } from "./usageScanCache.ts";
 import type { UsageRecord } from "./usageTranscripts.ts";
+import { readPlanLimits } from "./usagePlanLimits.ts";
 
 const LITELLM_RATES_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
@@ -123,6 +125,7 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig;
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const httpClient = yield* HttpClient.HttpClient;
+  const subscriptionAuth = SubscriptionAuthService.forSecretsDir(config.secretsDir);
 
   const fileCache: ScanCache = new Map();
   let cacheDirty = false;
@@ -220,8 +223,12 @@ export const make = Effect.gen(function* () {
     const codexLayout = yield* resolveCodexHomeLayout(settings.providers.codex);
 
     return [
-      { provider: "claude" as const, dir: claudeDir },
-      { provider: "codex" as const, dir: path.join(codexLayout.sharedHomePath, "sessions") },
+      { provider: "claude" as const, dir: claudeDir, homePath: claudeHome },
+      {
+        provider: "codex" as const,
+        dir: path.join(codexLayout.sharedHomePath, "sessions"),
+        homePath: codexLayout.sharedHomePath,
+      },
     ];
   });
 
@@ -420,6 +427,10 @@ export const make = Effect.gen(function* () {
     const aggregated = aggregator.finish();
     const readAt = yield* DateTime.now;
     const finishedAtMs = yield* Clock.currentTimeMillis;
+    subscriptionAuth.reload();
+    const planLimits = yield* Effect.promise(() =>
+      readPlanLimits((provider) => subscriptionAuth.getAccessToken(provider)),
+    ).pipe(Effect.catchCause(() => Effect.succeed([])));
 
     return {
       contractVersion: USAGE_CONTRACT_VERSION,
@@ -429,6 +440,7 @@ export const make = Effect.gen(function* () {
       untilDay: input.untilDay,
       buckets: aggregated.buckets,
       sources,
+      planLimits,
       pricing: {
         status: ratesStatus,
         source: LITELLM_RATES_URL,

@@ -15,11 +15,13 @@ import {
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
   AuthSessionId,
+  BotId,
   ClientSurface,
   CommandId,
   type DiscoveredLocalServerList,
   EventId,
   type EditorId,
+  GroupId,
   type FileManagerRevealKind,
   type OrchestrationClientOrigin,
   type OrchestrationCommand,
@@ -55,6 +57,7 @@ import {
   AssetWorkspaceContextResolutionError,
   RpcClientId,
   EnvironmentAuthorizationError,
+  SubscriptionAuthError,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -64,6 +67,7 @@ import {
   WsRpcGroup,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import { SubscriptionAuthService } from "./subscription-auth/service.ts";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -81,13 +85,15 @@ import {
 } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectionBots from "./persistence/Services/ProjectionBots.ts";
+import * as ProjectionGroups from "./persistence/Services/ProjectionGroups.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
+import * as AgentController from "./provider/Services/AgentController.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -119,7 +125,6 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
-import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -430,6 +435,8 @@ const makeWsRpcLayer = (
       const currentSessionId = currentSession.sessionId;
       const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+      const projectionBots = yield* ProjectionBots.ProjectionBotRepository;
+      const projectionGroups = yield* ProjectionGroups.ProjectionGroupRepository;
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
       const analytics = yield* AnalyticsService.AnalyticsService;
       // Every command dispatched on this connection carries the connecting
@@ -471,11 +478,12 @@ const makeWsRpcLayer = (
       const terminalManager = yield* TerminalManager.TerminalManager;
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
+      const agentController = yield* AgentController.AgentController;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
-      const providerService = yield* ProviderService.ProviderService;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
+      const subscriptionAuth = SubscriptionAuthService.forSecretsDir(config.secretsDir);
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -513,7 +521,6 @@ const makeWsRpcLayer = (
       );
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
-      const pullRequests = yield* PullRequestService.PullRequestService;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
@@ -660,6 +667,44 @@ const makeWsRpcLayer = (
                 projectId: event.payload.projectId,
               }),
             );
+          case "bot.created":
+          case "bot.updated":
+          case "bot.archived":
+          case "bot.restored":
+            return botUpsert(event.payload.botId, event.sequence);
+          case "group.created":
+          case "group.renamed":
+          case "group.member-assigned":
+          case "group.member-unassigned":
+          case "group.boss-set":
+            return groupUpsertOrRemove(event.payload.groupId, event.sequence);
+          case "group.deleted":
+            return Effect.succeed(
+              Option.some({
+                kind: "group-removed" as const,
+                sequence: event.sequence,
+                groupId: event.payload.groupId,
+              }),
+            );
+          case "mcp-server.created":
+          case "mcp-server.updated":
+          case "mcp-server.enabled":
+          case "mcp-server.disabled":
+            return Effect.succeed(
+              Option.some({
+                kind: "mcp-server-upserted" as const,
+                sequence: event.sequence,
+                mcpServer: event.payload.mcpServer,
+              }),
+            );
+          case "mcp-server.deleted":
+            return Effect.succeed(
+              Option.some({
+                kind: "mcp-server-removed" as const,
+                sequence: event.sequence,
+                mcpServerId: event.payload.mcpServerId,
+              }),
+            );
           case "thread.deleted":
           case "thread.archived":
             return Effect.succeed(
@@ -685,7 +730,7 @@ const makeWsRpcLayer = (
       // If both attempts fail, log and drop the stream item; treating an error as
       // a missing row would incorrectly remove a still-active aggregate.
       const retryShellProjectionRead = <A, E>(
-        aggregateKind: "project" | "thread",
+        aggregateKind: "project" | "bot" | "group" | "thread",
         aggregateId: string,
         read: Effect.Effect<A, E>,
       ): Effect.Effect<Option.Option<A>, never, never> =>
@@ -725,6 +770,73 @@ const makeWsRpcLayer = (
                     kind: "project-upserted" as const,
                     sequence,
                     project: nextProject,
+                  }),
+              }),
+            ),
+          ),
+        );
+
+      const botUpsert = (
+        botId: BotId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead("bot", botId, projectionBots.getById({ botId })).pipe(
+          Effect.map(
+            Option.flatMap((bot) =>
+              Option.map(
+                bot,
+                (nextBot): OrchestrationShellStreamEvent => ({
+                  kind: "bot-upserted",
+                  sequence,
+                  bot: {
+                    id: nextBot.botId,
+                    name: nextBot.name,
+                    title: nextBot.title,
+                    label: nextBot.label,
+                    description: nextBot.description,
+                    disabledMcpServerIds: nextBot.disabledMcpServerIds,
+                    avatar: nextBot.avatar,
+                    engine: nextBot.engine,
+                    sandbox: nextBot.sandbox,
+                    runtimeMode: nextBot.runtimeMode,
+                    usageCap: nextBot.usageCap,
+                    groupId: nextBot.groupId,
+                    archivedAt: nextBot.archivedAt,
+                    createdAt: nextBot.createdAt,
+                    updatedAt: nextBot.updatedAt,
+                  },
+                }),
+              ),
+            ),
+          ),
+        );
+
+      const groupUpsertOrRemove = (
+        groupId: GroupId,
+        sequence: number,
+      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
+        retryShellProjectionRead("group", groupId, projectionGroups.getById({ groupId })).pipe(
+          Effect.map(
+            Option.flatMap((group) =>
+              Option.match(group, {
+                onNone: () =>
+                  Option.some<OrchestrationShellStreamEvent>({
+                    kind: "group-removed",
+                    sequence,
+                    groupId,
+                  }),
+                onSome: (nextGroup) =>
+                  Option.some<OrchestrationShellStreamEvent>({
+                    kind: "group-upserted",
+                    sequence,
+                    group: {
+                      id: nextGroup.groupId,
+                      name: nextGroup.name,
+                      bossBotId: nextGroup.bossBotId,
+                      members: nextGroup.members,
+                      createdAt: nextGroup.createdAt,
+                      updatedAt: nextGroup.updatedAt,
+                    },
                   }),
               }),
             ),
@@ -1003,6 +1115,8 @@ const makeWsRpcLayer = (
                 commandId: yield* serverCommandId("bootstrap-thread-create"),
                 threadId: command.threadId,
                 projectId: bootstrap.createThread.projectId,
+                botId: bootstrap.createThread.botId ?? null,
+                groupId: bootstrap.createThread.groupId ?? null,
                 title: bootstrap.createThread.title,
                 modelSelection: bootstrap.createThread.modelSelection,
                 runtimeMode: bootstrap.createThread.runtimeMode,
@@ -1592,7 +1706,7 @@ const makeWsRpcLayer = (
         [WS_METHODS.providerUploadFeedback]: (input) =>
           observeRpcEffect(
             WS_METHODS.providerUploadFeedback,
-            providerService.uploadFeedback(input).pipe(
+            agentController.uploadFeedback(input).pipe(
               Effect.mapError(
                 (cause) =>
                   new ProviderUploadFeedbackError({
@@ -1679,6 +1793,66 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "server",
             },
+          ),
+        [WS_METHODS.subscriptionAuthList]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.subscriptionAuthList,
+            Effect.sync(() => ({ providers: subscriptionAuth.statuses() })),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscriptionAuthStart]: ({ provider }) =>
+          observeRpcEffect(
+            WS_METHODS.subscriptionAuthStart,
+            Effect.tryPromise({
+              try: () => subscriptionAuth.startLogin(provider),
+              catch: (cause) =>
+                new SubscriptionAuthError({
+                  reason: cause instanceof Error ? cause.message : String(cause),
+                }),
+            }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscriptionAuthPoll]: ({ loginId }) =>
+          observeRpcEffect(
+            WS_METHODS.subscriptionAuthPoll,
+            Effect.tryPromise({
+              try: () => subscriptionAuth.pollLogin(loginId),
+              catch: (cause) =>
+                new SubscriptionAuthError({
+                  reason: cause instanceof Error ? cause.message : String(cause),
+                }),
+            }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscriptionAuthComplete]: ({ loginId, code }) =>
+          observeRpcEffect(
+            WS_METHODS.subscriptionAuthComplete,
+            Effect.tryPromise({
+              try: () => subscriptionAuth.completeLogin(loginId, code),
+              catch: (cause) =>
+                new SubscriptionAuthError({
+                  reason: cause instanceof Error ? cause.message : String(cause),
+                }),
+            }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscriptionAuthCancel]: ({ loginId }) =>
+          observeRpcEffect(
+            WS_METHODS.subscriptionAuthCancel,
+            Effect.sync(() => {
+              subscriptionAuth.cancelLogin(loginId);
+              return {};
+            }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscriptionAuthLogout]: ({ provider }) =>
+          observeRpcEffect(
+            WS_METHODS.subscriptionAuthLogout,
+            Effect.sync(() => {
+              subscriptionAuth.logout(provider);
+              return { providers: subscriptionAuth.statuses() };
+            }),
+            { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(
@@ -1791,92 +1965,6 @@ const makeWsRpcLayer = (
                   ),
             ),
             { "rpc.aggregate": "cloud" },
-          ),
-        [WS_METHODS.pullRequestsList]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsList, pullRequests.list(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsListStats]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsListStats, pullRequests.listStats(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsDetail]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsDetail, pullRequests.detail(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsActivity]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsActivity, pullRequests.activity(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsThreadComments]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.pullRequestsThreadComments,
-            pullRequests.threadComments(input),
-            {
-              "rpc.aggregate": "pull-requests",
-            },
-          ),
-        [WS_METHODS.pullRequestsDiffFileContents]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.pullRequestsDiffFileContents,
-            pullRequests.diffFileContents(input),
-            { "rpc.aggregate": "pull-requests" },
-          ),
-        [WS_METHODS.pullRequestsRunAction]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsRunAction, pullRequests.runAction(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsUpdate]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsUpdate, pullRequests.update(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsComment]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsComment, pullRequests.comment(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsUpdateComment]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.pullRequestsUpdateComment,
-            pullRequests.updateComment(input),
-            {
-              "rpc.aggregate": "pull-requests",
-            },
-          ),
-        [WS_METHODS.pullRequestsSubmitReview]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsSubmitReview, pullRequests.submitReview(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsReplyToThread]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.pullRequestsReplyToThread,
-            pullRequests.replyToThread(input),
-            { "rpc.aggregate": "pull-requests" },
-          ),
-        [WS_METHODS.pullRequestsSetThreadResolution]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.pullRequestsSetThreadResolution,
-            pullRequests.setThreadResolution(input),
-            { "rpc.aggregate": "pull-requests" },
-          ),
-        [WS_METHODS.pullRequestsSetReaction]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsSetReaction, pullRequests.setReaction(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsInvalidate]: (input) =>
-          observeRpcEffect(WS_METHODS.pullRequestsInvalidate, pullRequests.invalidate(input), {
-            "rpc.aggregate": "pull-requests",
-          }),
-        [WS_METHODS.pullRequestsReviewerCandidates]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.pullRequestsReviewerCandidates,
-            pullRequests.reviewerCandidates(input),
-            { "rpc.aggregate": "pull-requests" },
-          ),
-        [WS_METHODS.pullRequestsRequestReviewers]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.pullRequestsRequestReviewers,
-            pullRequests.requestReviewers(input),
-            { "rpc.aggregate": "pull-requests" },
           ),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
@@ -2461,7 +2549,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
-    const pullRequests = yield* PullRequestService.PullRequestService;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -2492,9 +2579,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
-              // One server-lifetime service means clients share the same PR caches, and a WS
-              // mutation invalidates the HTTP diff cache that every client reads from.
-              Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

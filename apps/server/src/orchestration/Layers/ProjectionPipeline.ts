@@ -15,7 +15,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
+import { ProjectionBotRepository } from "../../persistence/Services/ProjectionBots.ts";
+import { ProjectionGroupRepository } from "../../persistence/Services/ProjectionGroups.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
+import { ProjectionMcpServerRepository } from "../../persistence/Services/ProjectionMcpServers.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -34,7 +37,10 @@ import {
   ProjectionTurnRepository,
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
+import { ProjectionBotRepositoryLive } from "../../persistence/Layers/ProjectionBots.ts";
+import { ProjectionGroupRepositoryLive } from "../../persistence/Layers/ProjectionGroups.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
+import { ProjectionMcpServerRepositoryLive } from "../../persistence/Layers/ProjectionMcpServers.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
@@ -57,6 +63,9 @@ import {
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
+  bots: "projection.bots",
+  groups: "projection.groups",
+  mcpServers: "projection.mcp-servers",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
@@ -496,6 +505,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const eventStore = yield* OrchestrationEventStore;
     const projectionStateRepository = yield* ProjectionStateRepository;
     const projectionProjectRepository = yield* ProjectionProjectRepository;
+    const projectionBotRepository = yield* ProjectionBotRepository;
+    const projectionGroupRepository = yield* ProjectionGroupRepository;
+    const projectionMcpServerRepository = yield* ProjectionMcpServerRepository;
     const projectionThreadRepository = yield* ProjectionThreadRepository;
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
@@ -575,6 +587,197 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
     });
 
+    const applyBotsProjection: ProjectorDefinition["apply"] = Effect.fn("applyBotsProjection")(
+      function* (event, _attachmentSideEffects) {
+        switch (event.type) {
+          case "bot.created":
+            yield* projectionBotRepository.upsert({
+              botId: event.payload.botId,
+              name: event.payload.name,
+              title: event.payload.title,
+              label: event.payload.label,
+              description: event.payload.description,
+              disabledMcpServerIds: event.payload.disabledMcpServerIds,
+              avatar: event.payload.avatar,
+              engine: event.payload.engine,
+              sandbox: event.payload.sandbox,
+              runtimeMode: event.payload.runtimeMode,
+              usageCap: event.payload.usageCap,
+              groupId: event.payload.groupId,
+              archivedAt: null,
+              createdAt: event.payload.createdAt,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          case "bot.updated": {
+            const existing = yield* projectionBotRepository.getById({ botId: event.payload.botId });
+            if (Option.isNone(existing)) return;
+            yield* projectionBotRepository.upsert({
+              ...existing.value,
+              ...(event.payload.name !== undefined ? { name: event.payload.name } : {}),
+              ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+              ...(event.payload.label !== undefined ? { label: event.payload.label } : {}),
+              ...(event.payload.description !== undefined
+                ? { description: event.payload.description }
+                : {}),
+              ...(event.payload.disabledMcpServerIds !== undefined
+                ? { disabledMcpServerIds: event.payload.disabledMcpServerIds }
+                : {}),
+              ...(event.payload.avatar !== undefined ? { avatar: event.payload.avatar } : {}),
+              ...(event.payload.engine !== undefined ? { engine: event.payload.engine } : {}),
+              ...(event.payload.sandbox !== undefined ? { sandbox: event.payload.sandbox } : {}),
+              ...(event.payload.runtimeMode !== undefined
+                ? { runtimeMode: event.payload.runtimeMode }
+                : {}),
+              ...(event.payload.usageCap !== undefined ? { usageCap: event.payload.usageCap } : {}),
+              ...(event.payload.groupId !== undefined ? { groupId: event.payload.groupId } : {}),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "bot.archived": {
+            const existing = yield* projectionBotRepository.getById({ botId: event.payload.botId });
+            if (Option.isNone(existing)) return;
+            yield* projectionBotRepository.upsert({
+              ...existing.value,
+              archivedAt: event.payload.archivedAt,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "bot.restored": {
+            const existing = yield* projectionBotRepository.getById({ botId: event.payload.botId });
+            if (Option.isNone(existing)) return;
+            yield* projectionBotRepository.upsert({
+              ...existing.value,
+              archivedAt: null,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          default:
+            return;
+        }
+      },
+    );
+
+    const applyGroupsProjection: ProjectorDefinition["apply"] = Effect.fn("applyGroupsProjection")(
+      function* (event, _attachmentSideEffects) {
+        switch (event.type) {
+          case "group.created":
+            yield* projectionGroupRepository.upsert({
+              groupId: event.payload.groupId,
+              name: event.payload.name,
+              bossBotId: event.payload.bossBotId,
+              members: event.payload.members,
+              createdAt: event.payload.createdAt,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          case "group.renamed": {
+            const existing = yield* projectionGroupRepository.getById({
+              groupId: event.payload.groupId,
+            });
+            if (Option.isNone(existing)) return;
+            yield* projectionGroupRepository.upsert({
+              ...existing.value,
+              name: event.payload.name,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "group.member-assigned": {
+            const existing = yield* projectionGroupRepository.getById({
+              groupId: event.payload.groupId,
+            });
+            if (Option.isNone(existing)) return;
+            const members = existing.value.members.some(
+              (member) => member.botId === event.payload.member.botId,
+            )
+              ? existing.value.members.map((member) =>
+                  member.botId === event.payload.member.botId ? event.payload.member : member,
+                )
+              : [...existing.value.members, event.payload.member];
+            yield* projectionGroupRepository.upsert({
+              ...existing.value,
+              bossBotId:
+                event.payload.member.role === "boss"
+                  ? event.payload.member.botId
+                  : existing.value.bossBotId,
+              members,
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "group.member-unassigned": {
+            const existing = yield* projectionGroupRepository.getById({
+              groupId: event.payload.groupId,
+            });
+            if (Option.isNone(existing)) return;
+            yield* projectionGroupRepository.upsert({
+              ...existing.value,
+              members: existing.value.members.filter(
+                (member) => member.botId !== event.payload.botId,
+              ),
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "group.boss-set": {
+            const existing = yield* projectionGroupRepository.getById({
+              groupId: event.payload.groupId,
+            });
+            if (Option.isNone(existing)) return;
+            let members = existing.value.members.filter(
+              (member) => member.botId !== event.payload.bossBotId,
+            );
+            if (event.payload.previousBossBotId !== null) {
+              members = members.filter(
+                (member) => member.botId !== event.payload.previousBossBotId,
+              );
+              if (event.payload.previousBossRole === "specialist") {
+                members = [
+                  ...members,
+                  { botId: event.payload.previousBossBotId, role: "specialist" },
+                ];
+              }
+            }
+            yield* projectionGroupRepository.upsert({
+              ...existing.value,
+              bossBotId: event.payload.bossBotId,
+              members: [...members, { botId: event.payload.bossBotId, role: "boss" }],
+              updatedAt: event.payload.updatedAt,
+            });
+            return;
+          }
+          case "group.deleted":
+            yield* projectionGroupRepository.deleteById({ groupId: event.payload.groupId });
+            return;
+          default:
+            return;
+        }
+      },
+    );
+    const applyMcpServersProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyMcpServersProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "mcp-server.created":
+        case "mcp-server.updated":
+        case "mcp-server.enabled":
+        case "mcp-server.disabled":
+          yield* projectionMcpServerRepository.upsert(event.payload.mcpServer);
+          return;
+        case "mcp-server.deleted":
+          yield* projectionMcpServerRepository.deleteById({
+            mcpServerId: event.payload.mcpServerId,
+          });
+          return;
+        default:
+          return;
+      }
+    });
+
     const refreshThreadShellSummary = Effect.fn("refreshThreadShellSummary")(function* (
       threadId: ThreadId,
     ) {
@@ -628,6 +831,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             threadId: event.payload.threadId,
             projectId: event.payload.projectId,
+            botId: event.payload.botId ?? null,
+            groupId: event.payload.groupId ?? null,
+            respondingBotId: null,
             title: event.payload.title,
             modelSelection: event.payload.modelSelection,
             runtimeMode: event.payload.runtimeMode,
@@ -886,6 +1092,19 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.turn-start-requested": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) return;
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            respondingBotId: event.payload.respondingBotId ?? null,
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":
@@ -1014,6 +1233,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             messageId: event.payload.messageId,
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
+            respondingBotId:
+              event.payload.respondingBotId ?? previousMessage?.respondingBotId ?? null,
             role: event.payload.role,
             text: nextText,
             ...(nextAttachments !== undefined ? { attachments: [...nextAttachments] } : {}),
@@ -1191,6 +1412,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
+            respondingBotId: event.payload.respondingBotId ?? null,
             sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             requestedAt: event.payload.createdAt,
@@ -1289,6 +1511,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 (Option.isSome(pendingTurnStart)
                   ? pendingTurnStart.value.sourceProposedPlanId
                   : null),
+              respondingBotId:
+                existingTurn.value.respondingBotId ??
+                (Option.isSome(pendingTurnStart) ? pendingTurnStart.value.respondingBotId : null),
               startedAt:
                 existingTurn.value.startedAt ??
                 (Option.isSome(pendingTurnStart)
@@ -1314,6 +1539,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 ? pendingTurnStart.value.sourceProposedPlanId
                 : null,
               assistantMessageId: null,
+              respondingBotId: Option.isSome(pendingTurnStart)
+                ? pendingTurnStart.value.respondingBotId
+                : null,
               state: "running",
               requestedAt: Option.isSome(pendingTurnStart)
                 ? pendingTurnStart.value.requestedAt
@@ -1360,6 +1588,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             yield* projectionTurnRepository.upsertByTurnId({
               ...existingTurn.value,
               assistantMessageId: event.payload.messageId,
+              respondingBotId:
+                existingTurn.value.respondingBotId ?? event.payload.respondingBotId ?? null,
               state: settlesTurn
                 ? existingTurn.value.state === "interrupted"
                   ? "interrupted"
@@ -1382,6 +1612,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
             assistantMessageId: event.payload.messageId,
+            respondingBotId: event.payload.respondingBotId ?? null,
             state: settlesTurn ? "completed" : "running",
             requestedAt: event.payload.createdAt,
             startedAt: event.payload.createdAt,
@@ -1419,6 +1650,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
             assistantMessageId: null,
+            respondingBotId: null,
             state: "interrupted",
             requestedAt: event.payload.createdAt,
             startedAt: event.payload.createdAt,
@@ -1474,6 +1706,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
             assistantMessageId: event.payload.assistantMessageId,
+            respondingBotId: null,
             state: turnStillRunning ? "running" : nextState,
             requestedAt: event.payload.completedAt,
             startedAt: event.payload.completedAt,
@@ -1651,6 +1884,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyProjectsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.bots,
+        apply: applyBotsProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.groups,
+        apply: applyGroupsProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.mcpServers,
+        apply: applyMcpServersProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -1777,6 +2022,9 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   makeOrchestrationProjectionPipeline(),
 ).pipe(
   Layer.provideMerge(ProjectionProjectRepositoryLive),
+  Layer.provideMerge(ProjectionBotRepositoryLive),
+  Layer.provideMerge(ProjectionGroupRepositoryLive),
+  Layer.provideMerge(ProjectionMcpServerRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),

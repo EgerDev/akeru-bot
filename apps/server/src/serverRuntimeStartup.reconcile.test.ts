@@ -15,7 +15,7 @@ import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderSessionDirectoryPersistenceError } from "./provider/Errors.ts";
-import * as ProviderService from "./provider/Services/ProviderService.ts";
+import * as AgentController from "./provider/Services/AgentController.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 
@@ -43,8 +43,10 @@ const makeThread = (
   },
 });
 
-const makeProviderService = (liveThreadIds: ReadonlyArray<ThreadId> = []) =>
+const makeAgentController = (liveThreadIds: ReadonlyArray<ThreadId> = []) =>
   ({
+    resolveEngine: () => Effect.die("unused"),
+    inspectEngine: () => Effect.die("unused"),
     startSession: () => Effect.die("unused"),
     sendTurn: () => Effect.die("unused"),
     interruptTurn: () => Effect.die("unused"),
@@ -52,12 +54,10 @@ const makeProviderService = (liveThreadIds: ReadonlyArray<ThreadId> = []) =>
     respondToUserInput: () => Effect.die("unused"),
     stopSession: () => Effect.die("unused"),
     listSessions: () => Effect.succeed(liveThreadIds.map((threadId) => ({ threadId }) as never)),
-    getCapabilities: () => Effect.die("unused"),
-    getInstanceInfo: () => Effect.die("unused"),
     rollbackConversation: () => Effect.die("unused"),
     uploadFeedback: () => Effect.die("unused"),
     streamEvents: Stream.empty,
-  }) satisfies ProviderService.ProviderService["Service"];
+  }) satisfies AgentController.AgentController["Service"];
 
 const queryWithThreads = (threads: ReadonlyArray<ReturnType<typeof makeThread>>) =>
   ({
@@ -76,8 +76,8 @@ const runReconciliation = (input: {
       queryWithThreads(input.threads),
     ),
     Effect.provideService(
-      ProviderService.ProviderService,
-      makeProviderService(input.liveThreadIds),
+      AgentController.AgentController,
+      makeAgentController(input.liveThreadIds),
     ),
     Effect.provideService(ProviderSessionDirectory.ProviderSessionDirectory, input.directory),
     Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
@@ -274,8 +274,8 @@ it.effect("does not fail startup when the live provider session inventory cannot
           return { threads: [] } as never;
         }),
     } as unknown as ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]),
-    Effect.provideService(ProviderService.ProviderService, {
-      ...makeProviderService(),
+    Effect.provideService(AgentController.AgentController, {
+      ...makeAgentController(),
       listSessions: () => Effect.die("provider inventory unavailable"),
     }),
     Effect.provideService(ProviderSessionDirectory.ProviderSessionDirectory, {

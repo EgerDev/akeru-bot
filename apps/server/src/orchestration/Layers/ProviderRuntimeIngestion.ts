@@ -29,7 +29,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
-import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { AgentController } from "../../provider/Services/AgentController.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { isGitRepository } from "../../git/Utils.ts";
@@ -893,7 +893,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-  const providerService = yield* ProviderService;
+  const agentController = yield* AgentController;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
@@ -1441,7 +1441,7 @@ const make = Effect.gen(function* () {
 
   const getExpectedProviderTurnIdForThread = Effect.fn("getExpectedProviderTurnIdForThread")(
     function* (threadId: ThreadId) {
-      const sessions = yield* providerService.listSessions();
+      const sessions = yield* agentController.listSessions();
       const session = sessions.find((entry) => entry.threadId === threadId);
       return session?.activeTurnId;
     },
@@ -2068,7 +2068,7 @@ const make = Effect.gen(function* () {
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
       yield* forkParked(
-        Stream.runForEach(providerService.streamEvents, (event) =>
+        Stream.runForEach(agentController.streamEvents, (event) =>
           worker.enqueue({ source: "runtime", event }),
         ),
       );

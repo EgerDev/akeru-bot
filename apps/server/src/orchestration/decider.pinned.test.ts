@@ -25,6 +25,8 @@ function makeReadModel(input: {
 }): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
+    bots: [],
+    groups: [],
     projects: [],
     threads: [
       {

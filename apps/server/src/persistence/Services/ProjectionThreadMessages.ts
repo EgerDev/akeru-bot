@@ -7,6 +7,7 @@
  * @module ProjectionThreadMessageRepository
  */
 import {
+  BotId,
   ChatAttachment,
   MessageId,
   OrchestrationMessageRole,
@@ -25,6 +26,7 @@ export const ProjectionThreadMessage = Schema.Struct({
   messageId: MessageId,
   threadId: ThreadId,
   turnId: Schema.NullOr(TurnId),
+  respondingBotId: Schema.optional(Schema.NullOr(BotId)),
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),

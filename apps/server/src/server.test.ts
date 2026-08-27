@@ -116,9 +116,11 @@ import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngi
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+import * as ProjectionBots from "./persistence/Services/ProjectionBots.ts";
+import * as ProjectionGroups from "./persistence/Services/ProjectionGroups.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
+import * as AgentController from "./provider/Services/AgentController.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import * as ProviderService from "./provider/Services/ProviderService.ts";
 import { ProviderAdapterRequestError } from "./provider/Errors.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -210,6 +212,8 @@ const makeDefaultOrchestrationReadModel = () => {
   return {
     snapshotSequence: 0,
     updatedAt: now,
+    bots: [],
+    groups: [],
     projects: [
       {
         id: defaultProjectId,
@@ -393,7 +397,7 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<Keybindings.Keybindings["Service"]>;
     providerRegistry?: Partial<ProviderRegistry.ProviderRegistry["Service"]>;
-    providerService?: Partial<ProviderService.ProviderService["Service"]>;
+    agentController?: Partial<AgentController.AgentController["Service"]>;
     serverSettings?: Partial<ServerSettings.ServerSettingsService["Service"]>;
     externalLauncher?: Partial<ExternalLauncher.ExternalLauncher["Service"]>;
     vcsDriver?: Partial<VcsDriver.VcsDriver["Service"]>;
@@ -649,9 +653,9 @@ const buildAppUnderTest = (options?: {
             streamChanges: Stream.empty,
             ...options?.layers?.providerRegistry,
           }),
-          Layer.mock(ProviderService.ProviderService)({
+          Layer.mock(AgentController.AgentController)({
             uploadFeedback: () => Effect.die("Provider feedback is not stubbed in this test"),
-            ...options?.layers?.providerService,
+            ...options?.layers?.agentController,
           }),
         ),
       ),
@@ -795,35 +799,52 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
-          getCommandReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              updatedAt: "1970-01-01T00:00:00.000Z",
-            }),
-          getArchivedShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              updatedAt: "1970-01-01T00:00:00.000Z",
-            }),
-          searchThreads: () => Effect.succeed({ matches: [] }),
-          getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-          getProjectShellById: () => Effect.succeed(Option.none()),
-          getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
-          getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-          ...options?.layers?.projectionSnapshotQuery,
-        }),
+        Layer.mergeAll(
+          Layer.succeed(ProjectionBots.ProjectionBotRepository, {
+            upsert: () => Effect.void,
+            getById: () => Effect.succeed(Option.none()),
+            listAll: () => Effect.succeed([]),
+          } satisfies ProjectionBots.ProjectionBotRepositoryShape),
+          Layer.succeed(ProjectionGroups.ProjectionGroupRepository, {
+            upsert: () => Effect.void,
+            getById: () => Effect.succeed(Option.none()),
+            listAll: () => Effect.succeed([]),
+            deleteById: () => Effect.void,
+          } satisfies ProjectionGroups.ProjectionGroupRepositoryShape),
+          Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+            getCommandReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+            getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                bots: [],
+                groups: [],
+                projects: [],
+                threads: [],
+                updatedAt: "1970-01-01T00:00:00.000Z",
+              }),
+            getArchivedShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                bots: [],
+                groups: [],
+                projects: [],
+                threads: [],
+                updatedAt: "1970-01-01T00:00:00.000Z",
+              }),
+            searchThreads: () => Effect.succeed({ matches: [] }),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+            getProjectShellById: () => Effect.succeed(Option.none()),
+            getThreadShellById: () => Effect.succeed(Option.none()),
+            getThreadDetailById: () => Effect.succeed(Option.none()),
+            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+            getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+            ...options?.layers?.projectionSnapshotQuery,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
@@ -982,7 +1003,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(layerConfig),
     );
 
-    yield* Layer.build(appLayer);
+    yield* Layer.build(Layer.fresh(appLayer));
     return config;
   });
 
@@ -4517,12 +4538,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         threadId: ThreadId.make("thread-feedback"),
         reason: "The agent stopped early.",
       };
-      const uploadFeedback = vi.fn<ProviderService.ProviderService["Service"]["uploadFeedback"]>(
+      const uploadFeedback = vi.fn<AgentController.AgentController["Service"]["uploadFeedback"]>(
         () => Effect.succeed({ feedbackId: "codex-thread-feedback" }),
       );
       yield* buildAppUnderTest({
         layers: {
-          providerService: { uploadFeedback },
+          agentController: { uploadFeedback },
         },
       });
 
@@ -4590,7 +4611,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const threadId = ThreadId.make("thread-feedback-failure");
       yield* buildAppUnderTest({
         layers: {
-          providerService: {
+          agentController: {
             uploadFeedback: () =>
               Effect.fail(
                 new ProviderAdapterRequestError({
@@ -6098,6 +6119,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const snapshot = {
         snapshotSequence: 1,
         updatedAt: now,
+        bots: [],
+        groups: [],
         projects: [
           {
             id: ProjectId.make("project-a"),
@@ -6339,6 +6362,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 yield* PubSub.publish(liveEvents, deletedEvent);
                 return {
                   snapshotSequence: 1,
+                  bots: [],
+                  groups: [],
                   projects: [],
                   threads: [makeDefaultOrchestrationThreadShell()],
                   updatedAt: "2026-01-01T00:00:00.000Z",
@@ -6597,6 +6622,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             getShellSnapshot: () =>
               Effect.succeed({
                 snapshotSequence: 100_000,
+                bots: [],
+                groups: [],
                 projects: [],
                 threads: [makeDefaultOrchestrationThreadShell({ id: snapshotThreadId })],
                 updatedAt: now,
@@ -6644,6 +6671,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             getShellSnapshot: () =>
               Effect.succeed({
                 snapshotSequence: 5,
+                bots: [],
+                groups: [],
                 projects: [],
                 threads: [],
                 updatedAt: "2026-01-01T00:00:00.000Z",
@@ -8416,10 +8445,7 @@ it.live(
   "reports thread HTTP and WebSocket transfer budgets",
   () =>
     Effect.gen(function* () {
-      const providers = [
-        ProviderDriverKind.make("codex"),
-        ProviderDriverKind.make("claudeAgent"),
-      ] as const;
+      const providers = [ProviderDriverKind.make("claudeAgent")] as const;
 
       const runs = yield* Effect.forEach(
         providers,

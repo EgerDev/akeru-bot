@@ -7,8 +7,10 @@ import {
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
+  type OrchestrationThread,
   ThreadId,
   type ProviderSession,
+  resolveBotMcpServers,
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
@@ -28,11 +30,16 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
-import type { ProviderServiceError } from "../../provider/Errors.ts";
+import {
+  AgentControllerUnsupportedEngineError,
+  ProviderAdapterRequestError,
+} from "../../provider/Errors.ts";
+import type { AgentControllerError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
-import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { AgentController } from "../../provider/Services/AgentController.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { ProjectionBotRepository } from "../../persistence/Services/ProjectionBots.ts";
+import { ProjectionMcpServerRepository } from "../../persistence/Services/ProjectionMcpServers.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -48,7 +55,14 @@ import {
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
+const isAgentControllerUnsupportedEngineError = Schema.is(AgentControllerUnsupportedEngineError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
+
+export function resolveControllerBotId(
+  thread: Pick<OrchestrationThread, "botId" | "respondingBotId">,
+) {
+  return thread.respondingBotId ?? thread.botId ?? null;
+}
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -229,13 +243,13 @@ export function providerErrorLabelFromInstanceHint(input: {
 }
 
 function findProviderAdapterRequestError(
-  cause: Cause.Cause<ProviderServiceError>,
+  cause: Cause.Cause<AgentControllerError>,
 ): ProviderAdapterRequestError | undefined {
   const failReason = cause.reasons.find(Cause.isFailReason);
   return isProviderAdapterRequestError(failReason?.error) ? failReason.error : undefined;
 }
 
-function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
+function isUnknownPendingApprovalRequestError(cause: Cause.Cause<AgentControllerError>): boolean {
   const error = findProviderAdapterRequestError(cause);
   if (error) {
     const detail = error.detail.toLowerCase();
@@ -251,7 +265,7 @@ function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderService
   );
 }
 
-function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
+function isUnknownPendingUserInputRequestError(cause: Cause.Cause<AgentControllerError>): boolean {
   const error = findProviderAdapterRequestError(cause);
   if (error) {
     const detail = error.detail.toLowerCase();
@@ -303,7 +317,9 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-  const providerService = yield* ProviderService;
+  const projectionBotRepository = yield* ProjectionBotRepository;
+  const projectionMcpServerRepository = yield* ProjectionMcpServerRepository;
+  const agentController = yield* AgentController;
   const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -376,7 +392,10 @@ const make = Effect.gen(function* () {
     if (providerError) {
       return providerError.detail;
     }
-    return Cause.pretty(cause);
+    const controllerError = isAgentControllerUnsupportedEngineError(failReason?.error)
+      ? failReason.error
+      : undefined;
+    return controllerError?.detail ?? Cause.pretty(cause);
   };
 
   const setThreadSession = (input: {
@@ -482,6 +501,42 @@ const make = Effect.gen(function* () {
       .pipe(Effect.map(Option.getOrUndefined));
   });
 
+  const inspectAvailableEngine = (modelSelection: ModelSelection) =>
+    agentController.inspectEngine(modelSelection);
+
+  const resolveControllerEngine = Effect.fnUntraced(function* (
+    thread: OrchestrationThread,
+    fallback: ModelSelection,
+  ) {
+    const respondingBotId = resolveControllerBotId(thread);
+    const bot =
+      respondingBotId == null
+        ? undefined
+        : yield* projectionBotRepository
+            .getById({ botId: respondingBotId })
+            .pipe(Effect.map(Option.getOrUndefined));
+    const engine = bot?.engine ?? null;
+    const selection = yield* agentController.resolveEngine({
+      threadId: thread.id,
+      engine,
+      fallback,
+      mode: thread.interactionMode,
+    });
+    return { ...selection, configured: engine !== null };
+  });
+
+  const resolveControllerMcpServers = Effect.fnUntraced(function* (thread: OrchestrationThread) {
+    const respondingBotId = resolveControllerBotId(thread);
+    const bot =
+      respondingBotId === null
+        ? undefined
+        : yield* projectionBotRepository
+            .getById({ botId: respondingBotId })
+            .pipe(Effect.map(Option.getOrUndefined));
+    const servers = yield* projectionMcpServerRepository.listAll();
+    return resolveBotMcpServers(servers, bot?.disabledMcpServerIds ?? []);
+  });
+
   const rejectStartedThreadModelChangeIfRequired = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly currentModelSelection: ModelSelection;
@@ -530,7 +585,7 @@ const make = Effect.gen(function* () {
     const desiredRuntimeMode = thread.runtimeMode;
     const requestedModelSelection = options?.modelSelection;
     const resolveActiveSession = (threadId: ThreadId) =>
-      providerService
+      agentController
         .listSessions()
         .pipe(Effect.map((sessions) => sessions.find((session) => session.threadId === threadId)));
 
@@ -557,34 +612,24 @@ const make = Effect.gen(function* () {
       activeSession.providerInstanceId !== undefined
         ? activeSession.providerInstanceId
         : thread.modelSelection.instanceId;
-    const desiredModelSelection = requestedModelSelection ?? thread.modelSelection;
+    const desiredEngine = yield* resolveControllerEngine(
+      thread,
+      requestedModelSelection ?? thread.modelSelection,
+    );
+    const desiredModelSelection = desiredEngine.modelSelection;
     const desiredInstanceId = desiredModelSelection.instanceId;
-    const currentInfo = yield* providerService.getInstanceInfo(currentInstanceId).pipe(
-      Effect.mapError(
-        () =>
-          new ProviderAdapterRequestError({
-            provider: providerErrorLabelFromInstanceHint({
-              instanceId: String(currentInstanceId),
-              modelSelectionInstanceId: String(thread.modelSelection.instanceId),
-              sessionProvider: thread.session?.providerName ?? undefined,
-            }),
-            method: "thread.turn.start",
-            detail: `Thread '${threadId}' references unknown provider instance '${currentInstanceId}'. The instance is not configured in this build.`,
-          }),
-      ),
-    );
-    const desiredInfo = yield* providerService.getInstanceInfo(desiredInstanceId).pipe(
-      Effect.mapError(
-        () =>
-          new ProviderAdapterRequestError({
-            provider: providerErrorLabelFromInstanceHint({
-              instanceId: String(desiredModelSelection.instanceId),
-            }),
-            method: "thread.turn.start",
-            detail: `Requested provider instance '${desiredInstanceId}' is not configured in this build.`,
-          }),
-      ),
-    );
+    const effectiveRequestedModelSelection = desiredEngine.configured
+      ? desiredModelSelection
+      : requestedModelSelection;
+    const currentEngine =
+      currentInstanceId === desiredInstanceId
+        ? desiredEngine
+        : yield* inspectAvailableEngine({
+            instanceId: currentInstanceId,
+            model: activeSession?.model ?? thread.modelSelection.model,
+          });
+    const currentInfo = currentEngine.routing;
+    const desiredInfo = desiredEngine.routing;
     const desiredDriverKind = desiredInfo.driverKind;
     if (!isProviderDriverKind(desiredDriverKind)) {
       return yield* new ProviderAdapterRequestError({
@@ -621,33 +666,19 @@ const make = Effect.gen(function* () {
                 model: activeSession.model,
               }
             : thread.modelSelection,
-        requestedModelSelection,
+        requestedModelSelection: effectiveRequestedModelSelection,
       });
     }
-    if (
-      thread.session !== null &&
-      requestedModelSelection !== undefined &&
-      requestedModelSelection.instanceId !== currentInstanceId
-    ) {
-      if (currentInfo.driverKind !== desiredInfo.driverKind) {
-        return yield* new ProviderAdapterRequestError({
-          provider: preferredProvider,
-          method: "thread.turn.start",
-          detail: `Thread '${threadId}' is bound to driver '${currentInfo.driverKind}' and cannot switch to '${desiredInfo.driverKind}'.`,
-        });
-      }
-      if (
-        currentInfo.continuationIdentity.continuationKey !==
-        desiredInfo.continuationIdentity.continuationKey
-      ) {
-        return yield* new ProviderAdapterRequestError({
-          provider: preferredProvider,
-          method: "thread.turn.start",
-          detail: `Thread '${threadId}' cannot switch from instance '${currentInstanceId}' to '${desiredInstanceId}' because their provider resume state is incompatible.`,
-        });
-      }
-    }
+    const providerChanged = currentInfo.driverKind !== desiredInfo.driverKind;
     const project = yield* resolveProject(thread.projectId);
+    const mcpServers = yield* resolveControllerMcpServers(thread);
+    const respondingBotId = resolveControllerBotId(thread);
+    const respondingBot =
+      respondingBotId === null
+        ? undefined
+        : yield* projectionBotRepository
+            .getById({ botId: respondingBotId })
+            .pipe(Effect.map(Option.getOrUndefined));
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: project ? [project] : [],
@@ -657,13 +688,15 @@ const make = Effect.gen(function* () {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderDriverKind;
     }) =>
-      providerService.startSession(threadId, {
+      agentController.startSession(threadId, {
         threadId,
         ...(preferredProvider ? { provider: preferredProvider } : {}),
         providerInstanceId: desiredInstanceId,
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         ...(thread.title ? { title: thread.title } : {}),
         modelSelection: desiredModelSelection,
+        mcpServers,
+        botSandbox: respondingBot?.sandbox ?? null,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: desiredRuntimeMode,
       });
@@ -702,34 +735,39 @@ const make = Effect.gen(function* () {
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
-      const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
-        .sessionModelSwitch;
+      const sessionModelSwitch = desiredEngine.capabilities.sessionModelSwitch;
       const modelChanged =
-        requestedModelSelection !== undefined &&
-        requestedModelSelection.model !== activeSession?.model;
+        effectiveRequestedModelSelection !== undefined &&
+        effectiveRequestedModelSelection.model !== activeSession?.model;
       const instanceChanged =
-        requestedModelSelection !== undefined &&
-        activeSession?.providerInstanceId !== requestedModelSelection.instanceId;
+        effectiveRequestedModelSelection !== undefined &&
+        activeSession?.providerInstanceId !== effectiveRequestedModelSelection.instanceId;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "unsupported";
       const previousModelSelection = threadModelSelections.get(threadId);
       const shouldRestartForModelSelectionChange =
         preferredProvider === "claudeAgent" &&
-        requestedModelSelection !== undefined &&
-        !Equal.equals(previousModelSelection, requestedModelSelection);
+        effectiveRequestedModelSelection !== undefined &&
+        !Equal.equals(previousModelSelection, effectiveRequestedModelSelection);
+      const mcpServersChanged = !Equal.equals(
+        activeSession?.mcpServerIds ?? [],
+        mcpServers.map((server) => server.id),
+      );
 
       if (
         !runtimeModeChanged &&
         !cwdChanged &&
         !instanceChanged &&
         !shouldRestartForModelChange &&
-        !shouldRestartForModelSelectionChange
+        !shouldRestartForModelSelectionChange &&
+        !mcpServersChanged
       ) {
-        return existingSessionThreadId;
+        return { threadId: existingSessionThreadId, engine: desiredEngine };
       }
 
-      const resumeCursor = shouldRestartForModelChange
-        ? undefined
-        : (activeSession?.resumeCursor ?? undefined);
+      const resumeCursor =
+        shouldRestartForModelChange || providerChanged
+          ? undefined
+          : (activeSession?.resumeCursor ?? undefined);
       yield* Effect.logInfo("provider command reactor restarting provider session", {
         threadId,
         existingSessionThreadId,
@@ -745,10 +783,15 @@ const make = Effect.gen(function* () {
         cwdChanged,
         modelChanged,
         instanceChanged,
+        providerChanged,
         shouldRestartForModelChange,
         shouldRestartForModelSelectionChange,
+        mcpServersChanged,
         hasResumeCursor: resumeCursor !== undefined,
       });
+      if (mcpServersChanged || providerChanged) {
+        yield* agentController.stopSession({ threadId });
+      }
       const restartedSession = yield* startProviderSession(
         resumeCursor !== undefined ? { resumeCursor } : undefined,
       );
@@ -761,12 +804,12 @@ const make = Effect.gen(function* () {
         cwd: restartedSession.cwd,
       });
       yield* bindSessionToThread(restartedSession);
-      return restartedSession.threadId;
+      return { threadId: restartedSession.threadId, engine: desiredEngine };
     }
 
     const startedSession = yield* startProviderSession(undefined);
     yield* bindSessionToThread(startedSession);
-    return startedSession.threadId;
+    return { threadId: startedSession.threadId, engine: desiredEngine };
   });
 
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
@@ -783,16 +826,16 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${input.threadId}' was not found in read model.`),
       );
     }
-    yield* ensureSessionForThread(input.threadId, input.createdAt, {
+    const ensured = yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
     });
-    if (input.modelSelection !== undefined) {
-      threadModelSelections.set(input.threadId, input.modelSelection);
+    if (input.modelSelection !== undefined || ensured.engine.configured) {
+      threadModelSelections.set(input.threadId, ensured.engine.modelSelection);
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
-    const activeSession = yield* providerService
+    const activeSession = yield* agentController
       .listSessions()
       .pipe(
         Effect.map((sessions) => sessions.find((session) => session.threadId === input.threadId)),
@@ -806,10 +849,13 @@ const make = Effect.gen(function* () {
               method: "thread.turn.start",
               detail: `Active provider session '${activeSession.threadId}' is missing a provider instance id.`,
             })
-          : (yield* providerService.getCapabilities(activeSession.providerInstanceId))
-              .sessionModelSwitch;
-    const requestedModelSelection =
-      input.modelSelection ?? threadModelSelections.get(input.threadId) ?? thread.modelSelection;
+          : activeSession.providerInstanceId === ensured.engine.modelSelection.instanceId
+            ? ensured.engine.capabilities.sessionModelSwitch
+            : (yield* inspectAvailableEngine({
+                instanceId: activeSession.providerInstanceId,
+                model: activeSession.model ?? thread.modelSelection.model,
+              })).capabilities.sessionModelSwitch;
+    const requestedModelSelection = ensured.engine.modelSelection;
     const modelForTurn =
       sessionModelSwitch === "unsupported" && input.modelSelection === undefined
         ? activeSession?.model !== undefined
@@ -818,7 +864,9 @@ const make = Effect.gen(function* () {
               model: activeSession.model,
             }
           : requestedModelSelection
-        : input.modelSelection;
+        : ensured.engine.configured
+          ? requestedModelSelection
+          : input.modelSelection;
 
     return {
       threadId: input.threadId,
@@ -1218,7 +1266,7 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
+    yield* agentController
       .sendTurn(sendTurnRequest.value)
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
@@ -1262,7 +1310,7 @@ const make = Effect.gen(function* () {
           return;
         }
 
-        yield* providerService.stopSession({ threadId: event.payload.threadId }).pipe(
+        yield* agentController.stopSession({ threadId: event.payload.threadId }).pipe(
           Effect.catchCause((stopCause) => {
             if (Cause.hasInterruptsOnly(stopCause)) {
               return Effect.interrupt;
@@ -1313,7 +1361,7 @@ const make = Effect.gen(function* () {
     };
 
     // Orchestration turn ids are not provider turn ids, so interrupt by session.
-    yield* providerService
+    yield* agentController
       .interruptTurn({ threadId: event.payload.threadId })
       .pipe(Effect.catchCause(recoverInterruptFailure));
   });
@@ -1338,7 +1386,7 @@ const make = Effect.gen(function* () {
       });
     }
 
-    yield* providerService
+    yield* agentController
       .respondToRequest({
         threadId: event.payload.threadId,
         requestId: event.payload.requestId,
@@ -1382,7 +1430,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      yield* providerService
+      yield* agentController
         .respondToUserInput({
           threadId: event.payload.threadId,
           requestId: event.payload.requestId,
@@ -1416,7 +1464,7 @@ const make = Effect.gen(function* () {
 
     const now = event.payload.createdAt;
     if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
+      yield* agentController.stopSession({ threadId: thread.id });
     }
 
     yield* setThreadSession({

@@ -56,6 +56,15 @@ import Migration0040 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
 import Migration0041 from "./Migrations/041_AuthSessionClientConnection.ts";
 import Migration0042 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
 import Migration0043 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
+import Migration0044 from "./Migrations/044_LinkedPullRequestAndAuthSessionClientColumns.ts";
+import Migration0045 from "./Migrations/045_ProjectionBotsAndGroups.ts";
+import Migration0046 from "./Migrations/046_ProjectionThreadOwnership.ts";
+import Migration0047 from "./Migrations/047_ProjectionMcpServers.ts";
+import Migration0048 from "./Migrations/048_GroupMembershipAndRespondingBots.ts";
+import Migration0049 from "./Migrations/049_BotRuntimeModeAndUsageCap.ts";
+import Migration0050 from "./Migrations/050_BotProfileMetadata.ts";
+import Migration0051 from "./Migrations/051_BotDisabledMcpServers.ts";
+import Migration0052 from "./Migrations/052_ExecutorPluginCommand.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -111,6 +120,15 @@ export const migrationEntries = [
   [41, "AuthSessionClientConnection", Migration0041],
   [42, "ProjectionThreadLinkedPullRequest", Migration0042],
   [43, "ProjectionThreadsUnsettledAt", Migration0043],
+  [44, "LinkedPullRequestAndAuthSessionClientColumns", Migration0044],
+  [45, "ProjectionBotsAndGroups", Migration0045],
+  [46, "ProjectionThreadOwnership", Migration0046],
+  [47, "ProjectionMcpServers", Migration0047],
+  [48, "GroupMembershipAndRespondingBots", Migration0048],
+  [49, "BotRuntimeModeAndUsageCap", Migration0049],
+  [50, "BotProfileMetadata", Migration0050],
+  [51, "BotDisabledMcpServers", Migration0051],
+  [52, "ExecutorPluginCommand", Migration0052],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

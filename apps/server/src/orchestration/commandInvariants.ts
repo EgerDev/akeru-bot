@@ -1,5 +1,11 @@
 import type {
+  BotId,
+  GroupId,
+  OrchestrationBot,
+  McpServer,
+  McpServerId,
   OrchestrationCommand,
+  OrchestrationGroup,
   OrchestrationProject,
   OrchestrationReadModel,
   OrchestrationThread,
@@ -30,6 +36,27 @@ export function findProjectById(
   projectId: ProjectId,
 ): OrchestrationProject | undefined {
   return readModel.projects.find((project) => project.id === projectId);
+}
+
+export function findBotById(
+  readModel: OrchestrationReadModel,
+  botId: BotId,
+): OrchestrationBot | undefined {
+  return readModel.bots.find((bot) => bot.id === botId);
+}
+
+export function findGroupById(
+  readModel: OrchestrationReadModel,
+  groupId: GroupId,
+): OrchestrationGroup | undefined {
+  return readModel.groups.find((group) => group.id === groupId);
+}
+
+export function findMcpServerById(
+  readModel: OrchestrationReadModel,
+  mcpServerId: McpServerId,
+): McpServer | undefined {
+  return readModel.mcpServers?.find((mcpServer) => mcpServer.id === mcpServerId);
 }
 
 export function listThreadsByProjectId(
@@ -92,6 +119,180 @@ export function requireActiveProjectWorkspaceRootAbsent(input: {
     invariantError(
       input.command.type,
       `Active project '${existingProject.id}' already exists for workspace root '${normalizedWorkspaceRoot}'.`,
+    ),
+  );
+}
+
+export function requireBot(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly botId: BotId;
+}): Effect.Effect<OrchestrationBot, OrchestrationCommandInvariantError> {
+  const bot = findBotById(input.readModel, input.botId);
+  return bot
+    ? Effect.succeed(bot)
+    : Effect.fail(
+        invariantError(
+          input.command.type,
+          `Bot '${input.botId}' does not exist for command '${input.command.type}'.`,
+        ),
+      );
+}
+
+export function requireBotAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly botId: BotId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  return findBotById(input.readModel, input.botId)
+    ? Effect.fail(
+        invariantError(
+          input.command.type,
+          `Bot '${input.botId}' already exists and cannot be created twice.`,
+        ),
+      )
+    : Effect.void;
+}
+
+export function requireBotArchived(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly botId: BotId;
+}): Effect.Effect<OrchestrationBot, OrchestrationCommandInvariantError> {
+  return requireBot(input).pipe(
+    Effect.flatMap((bot) =>
+      bot.archivedAt !== null
+        ? Effect.succeed(bot)
+        : Effect.fail(
+            invariantError(
+              input.command.type,
+              `Bot '${input.botId}' is not archived for command '${input.command.type}'.`,
+            ),
+          ),
+    ),
+  );
+}
+
+export function requireMcpServer(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly mcpServerId: McpServerId;
+}): Effect.Effect<McpServer, OrchestrationCommandInvariantError> {
+  const mcpServer = findMcpServerById(input.readModel, input.mcpServerId);
+  if (mcpServer) {
+    return Effect.succeed(mcpServer);
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `MCP server '${input.mcpServerId}' does not exist for command '${input.command.type}'.`,
+    ),
+  );
+}
+
+export function requireBotNotArchived(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly botId: BotId;
+}): Effect.Effect<OrchestrationBot, OrchestrationCommandInvariantError> {
+  return requireBot(input).pipe(
+    Effect.flatMap((bot) =>
+      bot.archivedAt === null
+        ? Effect.succeed(bot)
+        : Effect.fail(
+            invariantError(
+              input.command.type,
+              `Bot '${input.botId}' is archived for command '${input.command.type}'.`,
+            ),
+          ),
+    ),
+  );
+}
+
+export function requireMcpServerAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly mcpServerId: McpServerId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (!findMcpServerById(input.readModel, input.mcpServerId)) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `MCP server '${input.mcpServerId}' already exists and cannot be created twice.`,
+    ),
+  );
+}
+
+export function requireGroup(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly groupId: GroupId;
+}): Effect.Effect<OrchestrationGroup, OrchestrationCommandInvariantError> {
+  const group = findGroupById(input.readModel, input.groupId);
+  return group
+    ? Effect.succeed(group)
+    : Effect.fail(
+        invariantError(
+          input.command.type,
+          `Group '${input.groupId}' does not exist for command '${input.command.type}'.`,
+        ),
+      );
+}
+
+export function requireGroupAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly groupId: GroupId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  return findGroupById(input.readModel, input.groupId)
+    ? Effect.fail(
+        invariantError(
+          input.command.type,
+          `Group '${input.groupId}' already exists and cannot be created twice.`,
+        ),
+      )
+    : Effect.void;
+}
+
+export function requireGroupMember(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly groupId: GroupId;
+  readonly botId: BotId;
+}): Effect.Effect<OrchestrationBot, OrchestrationCommandInvariantError> {
+  return Effect.gen(function* () {
+    const group = yield* requireGroup(input);
+    const member = group.members.find((entry) => entry.botId === input.botId);
+    if (!member) {
+      return yield* Effect.fail(
+        invariantError(
+          input.command.type,
+          `Bot '${input.botId}' is not a member of group '${input.groupId}'.`,
+        ),
+      );
+    }
+    return yield* requireBot(input);
+  });
+}
+
+export function requireActiveGroupMember(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly groupId: GroupId;
+  readonly botId: BotId;
+}): Effect.Effect<OrchestrationBot, OrchestrationCommandInvariantError> {
+  return requireGroupMember(input).pipe(
+    Effect.flatMap((bot) =>
+      bot.archivedAt === null
+        ? Effect.succeed(bot)
+        : Effect.fail(
+            invariantError(
+              input.command.type,
+              `Bot '${input.botId}' is archived and cannot respond for group '${input.groupId}'.`,
+            ),
+          ),
     ),
   );
 }

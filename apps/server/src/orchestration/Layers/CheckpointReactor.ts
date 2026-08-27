@@ -27,7 +27,7 @@ import {
   resolveThreadWorkspaceCwd,
 } from "../../checkpointing/Utils.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
-import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { AgentController } from "../../provider/Services/AgentController.ts";
 import { CheckpointReactor, type CheckpointReactorShape } from "../Services/CheckpointReactor.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -83,7 +83,7 @@ const make = Effect.gen(function* () {
     randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-  const providerService = yield* ProviderService;
+  const agentController = yield* AgentController;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -155,7 +155,7 @@ const make = Effect.gen(function* () {
   const resolveSessionRuntimeForThread = Effect.fn("resolveSessionRuntimeForThread")(function* (
     threadId: ThreadId,
   ): Effect.fn.Return<Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }>> {
-    const sessions = yield* providerService.listSessions();
+    const sessions = yield* agentController.listSessions();
     const session = sessions.find((entry) => entry.threadId === threadId);
     return session?.cwd
       ? Option.some({ threadId: session.threadId, cwd: session.cwd })
@@ -776,7 +776,7 @@ const make = Effect.gen(function* () {
 
     const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
     if (rolledBackTurns > 0) {
-      yield* providerService.rollbackConversation({
+      yield* agentController.rollbackConversation({
         threadId: sessionRuntime.value.threadId,
         numTurns: rolledBackTurns,
       });
@@ -841,7 +841,7 @@ const make = Effect.gen(function* () {
 
     // When ProviderRuntimeIngestion creates a placeholder checkpoint (status "missing")
     // from a turn.diff.updated runtime event, capture the real git checkpoint to
-    // replace it. The providerService.streamEvents PubSub does not reliably deliver
+    // replace it. The AgentController stream does not reliably deliver
     // turn.completed runtime events to this reactor (shared subscription), so
     // reacting to the domain event is the reliable path.
     if (event.type === "thread.turn-diff-completed") {
@@ -928,7 +928,7 @@ const make = Effect.gen(function* () {
     );
 
     yield* forkParked(
-      Stream.runForEach(providerService.streamEvents, (event) => {
+      Stream.runForEach(agentController.streamEvents, (event) => {
         if (event.type !== "turn.started" && event.type !== "turn.completed") {
           return Effect.void;
         }

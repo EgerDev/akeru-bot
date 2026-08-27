@@ -31,6 +31,7 @@ function toProjectionThreadMessage(
     messageId: row.messageId,
     threadId: row.threadId,
     turnId: row.turnId,
+    respondingBotId: row.respondingBotId ?? null,
     role: row.role,
     text: row.text,
     isStreaming: row.isStreaming === 1,
@@ -53,6 +54,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           message_id,
           thread_id,
           turn_id,
+          responding_bot_id,
           role,
           text,
           attachments_json,
@@ -64,6 +66,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           ${row.messageId},
           ${row.threadId},
           ${row.turnId},
+          ${row.respondingBotId ?? null},
           ${row.role},
           ${row.text},
           COALESCE(
@@ -82,6 +85,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
         DO UPDATE SET
           thread_id = excluded.thread_id,
           turn_id = excluded.turn_id,
+          responding_bot_id = excluded.responding_bot_id,
           role = excluded.role,
           text = excluded.text,
           attachments_json = COALESCE(
@@ -104,6 +108,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           message_id AS "messageId",
           thread_id AS "threadId",
           turn_id AS "turnId",
+          responding_bot_id AS "respondingBotId",
           role,
           text,
           attachments_json AS "attachments",
@@ -125,6 +130,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           message_id AS "messageId",
           thread_id AS "threadId",
           turn_id AS "turnId",
+          responding_bot_id AS "respondingBotId",
           role,
           text,
           attachments_json AS "attachments",

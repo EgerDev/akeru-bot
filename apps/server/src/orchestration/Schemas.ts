@@ -2,6 +2,21 @@ import {
   ProjectCreatedPayload as ContractsProjectCreatedPayloadSchema,
   ProjectMetaUpdatedPayload as ContractsProjectMetaUpdatedPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
+  BotCreatedPayload as ContractsBotCreatedPayloadSchema,
+  BotUpdatedPayload as ContractsBotUpdatedPayloadSchema,
+  BotArchivedPayload as ContractsBotArchivedPayloadSchema,
+  BotRestoredPayload as ContractsBotRestoredPayloadSchema,
+  GroupCreatedPayload as ContractsGroupCreatedPayloadSchema,
+  GroupRenamedPayload as ContractsGroupRenamedPayloadSchema,
+  GroupDeletedPayload as ContractsGroupDeletedPayloadSchema,
+  GroupMemberAssignedPayload as ContractsGroupMemberAssignedPayloadSchema,
+  GroupMemberUnassignedPayload as ContractsGroupMemberUnassignedPayloadSchema,
+  GroupBossSetPayload as ContractsGroupBossSetPayloadSchema,
+  McpServerCreatedPayload as ContractsMcpServerCreatedPayloadSchema,
+  McpServerUpdatedPayload as ContractsMcpServerUpdatedPayloadSchema,
+  McpServerDeletedPayload as ContractsMcpServerDeletedPayloadSchema,
+  McpServerEnabledPayload as ContractsMcpServerEnabledPayloadSchema,
+  McpServerDisabledPayload as ContractsMcpServerDisabledPayloadSchema,
   ThreadCreatedPayload as ContractsThreadCreatedPayloadSchema,
   ThreadArchivedPayload as ContractsThreadArchivedPayloadSchema,
   ThreadSettledPayload as ContractsThreadSettledPayloadSchema,
@@ -33,6 +48,22 @@ import {
 export const ProjectCreatedPayload = ContractsProjectCreatedPayloadSchema;
 export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchema;
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
+
+export const BotCreatedPayload = ContractsBotCreatedPayloadSchema;
+export const BotUpdatedPayload = ContractsBotUpdatedPayloadSchema;
+export const BotArchivedPayload = ContractsBotArchivedPayloadSchema;
+export const BotRestoredPayload = ContractsBotRestoredPayloadSchema;
+export const GroupCreatedPayload = ContractsGroupCreatedPayloadSchema;
+export const GroupRenamedPayload = ContractsGroupRenamedPayloadSchema;
+export const GroupDeletedPayload = ContractsGroupDeletedPayloadSchema;
+export const GroupMemberAssignedPayload = ContractsGroupMemberAssignedPayloadSchema;
+export const GroupMemberUnassignedPayload = ContractsGroupMemberUnassignedPayloadSchema;
+export const GroupBossSetPayload = ContractsGroupBossSetPayloadSchema;
+export const McpServerCreatedPayload = ContractsMcpServerCreatedPayloadSchema;
+export const McpServerUpdatedPayload = ContractsMcpServerUpdatedPayloadSchema;
+export const McpServerDeletedPayload = ContractsMcpServerDeletedPayloadSchema;
+export const McpServerEnabledPayload = ContractsMcpServerEnabledPayloadSchema;
+export const McpServerDisabledPayload = ContractsMcpServerDisabledPayloadSchema;
 
 export const ThreadCreatedPayload = ContractsThreadCreatedPayloadSchema;
 export const ThreadArchivedPayload = ContractsThreadArchivedPayloadSchema;

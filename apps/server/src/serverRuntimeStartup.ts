@@ -34,7 +34,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import * as ProviderService from "./provider/Services/ProviderService.ts";
+import * as AgentController from "./provider/Services/AgentController.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReaper.ts";
 import { forkParked } from "./serverActivation.ts";
@@ -193,7 +193,16 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   let bootstrapProjectId: ProjectId | undefined;
   let bootstrapThreadId: ThreadId | undefined;
 
-  if (serverConfig.autoBootstrapProjectFromCwd) {
+  // Akeru Bot always lands in a chat: with no active project, a bot click
+  // would dead-end at the add-project wall, so first run provisions a
+  // workspace from the server cwd even without the explicit flag.
+  let shouldBootstrap = serverConfig.autoBootstrapProjectFromCwd;
+  if (!shouldBootstrap) {
+    const readModel = yield* projectionReadModelQuery.getCommandReadModel();
+    shouldBootstrap = !readModel.projects.some((project) => project.deletedAt === null);
+  }
+
+  if (shouldBootstrap) {
     yield* Effect.gen(function* () {
       const existingProject = yield* projectionReadModelQuery.getActiveProjectByWorkspaceRoot(
         serverConfig.cwd,
@@ -300,11 +309,11 @@ export const reconcileProviderSessions = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
-  const providerService = yield* ProviderService.ProviderService;
+  const agentController = yield* AgentController.AgentController;
   const query = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
 
   const liveThreadIds = new Set(
-    (yield* providerService.listSessions()).map((session) => session.threadId),
+    (yield* agentController.listSessions()).map((session) => session.threadId),
   );
   const { threads } = yield* query.getCommandReadModel();
   const orphanedThreads = threads.filter(
@@ -446,7 +455,9 @@ export const make = (options?: StartupOptions) =>
       const environment = yield* serverEnvironment.getDescriptor;
       yield* Effect.logDebug("startup phase: preparing welcome payload");
 
-      if (serverConfig.autoBootstrapProjectFromCwd) {
+      {
+        // Always attempt: resolveAutoBootstrapWelcomeTargets returns empty
+        // targets when a project already exists and no flag forces it.
         yield* forkParked(
           runStartupPhase(
             "welcome.autobootstrap",

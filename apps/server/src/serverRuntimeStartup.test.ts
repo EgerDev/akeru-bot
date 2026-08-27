@@ -226,6 +226,96 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
   }),
 );
 
+it.effect(
+  "resolveAutoBootstrapWelcomeTargets provisions a first-run workspace without the flag",
+  () =>
+    Effect.gen(function* () {
+      const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
+      const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+        Effect.provideService(ServerConfig.ServerConfig, {
+          cwd: "/tmp/startup-project",
+          autoBootstrapProjectFromCwd: false,
+        } as never),
+        Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+          getCommandReadModel: () => Effect.succeed({ projects: [] } as never),
+          getSnapshot: () => Effect.die("unused"),
+          getShellSnapshot: () => Effect.die("unused"),
+          getArchivedShellSnapshot: () => Effect.die("unused"),
+          getSnapshotSequence: () => Effect.die("unused"),
+          getCounts: () => Effect.die("unused"),
+          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          getProjectShellById: () => Effect.die("unused"),
+          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+          getFullThreadDiffContext: () => Effect.succeed(Option.none()),
+          getThreadShellById: () => Effect.die("unused"),
+          getThreadDetailById: () => Effect.die("unused"),
+          getThreadDetailSnapshot: () => Effect.die("unused"),
+          searchThreads: () => Effect.succeed({ matches: [] }),
+        }),
+        Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
+          readEvents: () => Stream.empty,
+          dispatch: (command) =>
+            Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
+              Effect.as({ sequence: 1 }),
+            ),
+          streamDomainEvents: Stream.empty,
+          latestSequence: Effect.succeed(0),
+        } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
+        Effect.provide(NodeServices.layer),
+      );
+
+      assert.equal(typeof targets.bootstrapProjectId, "string");
+      assert.equal(typeof targets.bootstrapThreadId, "string");
+      assert.deepStrictEqual(yield* Ref.get(dispatchCalls), ["project.create", "thread.create"]);
+    }),
+);
+
+it.effect(
+  "resolveAutoBootstrapWelcomeTargets stays idle when a project exists and no flag is set",
+  () =>
+    Effect.gen(function* () {
+      const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
+      const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
+        Effect.provideService(ServerConfig.ServerConfig, {
+          cwd: "/tmp/startup-project",
+          autoBootstrapProjectFromCwd: false,
+        } as never),
+        Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
+          getCommandReadModel: () =>
+            Effect.succeed({ projects: [{ id: "project-existing", deletedAt: null }] } as never),
+          getSnapshot: () => Effect.die("unused"),
+          getShellSnapshot: () => Effect.die("unused"),
+          getArchivedShellSnapshot: () => Effect.die("unused"),
+          getSnapshotSequence: () => Effect.die("unused"),
+          getCounts: () => Effect.die("unused"),
+          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
+          getProjectShellById: () => Effect.die("unused"),
+          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
+          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+          getFullThreadDiffContext: () => Effect.succeed(Option.none()),
+          getThreadShellById: () => Effect.die("unused"),
+          getThreadDetailById: () => Effect.die("unused"),
+          getThreadDetailSnapshot: () => Effect.die("unused"),
+          searchThreads: () => Effect.succeed({ matches: [] }),
+        }),
+        Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
+          readEvents: () => Stream.empty,
+          dispatch: (command) =>
+            Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
+              Effect.as({ sequence: 1 }),
+            ),
+          streamDomainEvents: Stream.empty,
+          latestSequence: Effect.succeed(0),
+        } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
+        Effect.provide(NodeServices.layer),
+      );
+
+      assert.deepStrictEqual(targets, {});
+      assert.deepStrictEqual(yield* Ref.get(dispatchCalls), []);
+    }),
+);
+
 it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation failures", () =>
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;

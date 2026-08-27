@@ -32,7 +32,7 @@ import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import * as ProviderSessionRuntime from "../src/persistence/ProviderSessionRuntime.ts";
 import * as ExternalLauncher from "../src/process/externalLauncher.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
-import * as ProviderService from "../src/provider/Services/ProviderService.ts";
+import * as AgentController from "../src/provider/Services/AgentController.ts";
 import * as ProviderSessionDirectory from "../src/provider/Services/ProviderSessionDirectory.ts";
 import * as ProviderSessionReaper from "../src/provider/Services/ProviderSessionReaper.ts";
 import * as RepositoryIdentityResolver from "../src/project/RepositoryIdentityResolver.ts";
@@ -105,7 +105,9 @@ const startupDependencies = Layer.mergeAll(
     }),
   ),
   AnalyticsService.layerTest,
-  Layer.succeed(ProviderService.ProviderService, {
+  Layer.succeed(AgentController.AgentController, {
+    resolveEngine: () => Effect.die("unused"),
+    inspectEngine: () => Effect.die("unused"),
     startSession: () => Effect.die("unused"),
     sendTurn: () => Effect.die("unused"),
     interruptTurn: () => Effect.die("unused"),
@@ -113,8 +115,6 @@ const startupDependencies = Layer.mergeAll(
     respondToUserInput: () => Effect.die("unused"),
     stopSession: () => Effect.die("unused"),
     listSessions: () => Effect.succeed([]),
-    getCapabilities: () => Effect.die("unused"),
-    getInstanceInfo: () => Effect.die("unused"),
     rollbackConversation: () => Effect.die("unused"),
     uploadFeedback: () => Effect.die("unused"),
     streamEvents: Stream.empty,

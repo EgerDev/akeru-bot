@@ -76,6 +76,9 @@ describe("orchestration projector", () => {
       {
         id: "thread-1",
         projectId: "project-1",
+        botId: null,
+        groupId: null,
+        respondingBotId: null,
         title: "demo",
         modelSelection: {
           instanceId: "codex",

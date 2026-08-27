@@ -1,4 +1,11 @@
-import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import type {
+  BotId,
+  OrchestrationBot,
+  OrchestrationEvent,
+  OrchestrationGroup,
+  OrchestrationReadModel,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
@@ -10,6 +17,18 @@ import * as Schema from "effect/Schema";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
+  BotArchivedPayload,
+  BotCreatedPayload,
+  BotRestoredPayload,
+  BotUpdatedPayload,
+  GroupBossSetPayload,
+  GroupCreatedPayload,
+  GroupDeletedPayload,
+  GroupMemberAssignedPayload,
+  GroupMemberUnassignedPayload,
+  GroupRenamedPayload,
+  McpServerCreatedPayload,
+  McpServerDeletedPayload,
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
@@ -33,6 +52,7 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadTurnStartRequestedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -66,6 +86,22 @@ function settledTurnStateForSessionStatus(
     case "running":
       return null;
   }
+}
+
+function updateBot(
+  bots: ReadonlyArray<OrchestrationBot>,
+  botId: BotId,
+  patch: Partial<Omit<OrchestrationBot, "id" | "createdAt">>,
+): OrchestrationBot[] {
+  return bots.map((bot) => (bot.id === botId ? { ...bot, ...patch } : bot));
+}
+
+function updateGroup(
+  groups: ReadonlyArray<OrchestrationGroup>,
+  groupId: OrchestrationGroup["id"],
+  patch: Partial<Omit<OrchestrationGroup, "id" | "createdAt">>,
+): OrchestrationGroup[] {
+  return groups.map((group) => (group.id === groupId ? { ...group, ...patch } : group));
 }
 
 function updateThread(
@@ -189,6 +225,9 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
     projects: [],
+    bots: [],
+    groups: [],
+    mcpServers: [],
     threads: [],
     updatedAt: nowIso,
   };
@@ -278,6 +317,215 @@ export function projectEvent(
         })),
       );
 
+    case "bot.created":
+      return decodeForEvent(BotCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const bot: OrchestrationBot = {
+            id: payload.botId,
+            name: payload.name,
+            title: payload.title,
+            label: payload.label,
+            description: payload.description,
+            disabledMcpServerIds: payload.disabledMcpServerIds,
+            avatar: payload.avatar,
+            engine: payload.engine,
+            sandbox: payload.sandbox,
+            runtimeMode: payload.runtimeMode,
+            usageCap: payload.usageCap,
+            groupId: payload.groupId,
+            archivedAt: null,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+          };
+          const existing = nextBase.bots.some((entry) => entry.id === payload.botId);
+          return {
+            ...nextBase,
+            bots: existing
+              ? nextBase.bots.map((entry) => (entry.id === payload.botId ? bot : entry))
+              : [...nextBase.bots, bot],
+          };
+        }),
+      );
+
+    case "bot.updated":
+      return decodeForEvent(BotUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          bots: updateBot(nextBase.bots, payload.botId, {
+            ...(payload.name !== undefined ? { name: payload.name } : {}),
+            ...(payload.title !== undefined ? { title: payload.title } : {}),
+            ...(payload.label !== undefined ? { label: payload.label } : {}),
+            ...(payload.description !== undefined ? { description: payload.description } : {}),
+            ...(payload.disabledMcpServerIds !== undefined
+              ? { disabledMcpServerIds: payload.disabledMcpServerIds }
+              : {}),
+            ...(payload.avatar !== undefined ? { avatar: payload.avatar } : {}),
+            ...(payload.engine !== undefined ? { engine: payload.engine } : {}),
+            ...(payload.sandbox !== undefined ? { sandbox: payload.sandbox } : {}),
+            ...(payload.runtimeMode !== undefined ? { runtimeMode: payload.runtimeMode } : {}),
+            ...(payload.usageCap !== undefined ? { usageCap: payload.usageCap } : {}),
+            ...(payload.groupId !== undefined ? { groupId: payload.groupId } : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "bot.archived":
+      return decodeForEvent(BotArchivedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          bots: updateBot(nextBase.bots, payload.botId, {
+            archivedAt: payload.archivedAt,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "bot.restored":
+      return decodeForEvent(BotRestoredPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          bots: updateBot(nextBase.bots, payload.botId, {
+            archivedAt: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "group.created":
+      return decodeForEvent(GroupCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const group: OrchestrationGroup = {
+            id: payload.groupId,
+            name: payload.name,
+            bossBotId: payload.bossBotId,
+            members: payload.members,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+          };
+          const existing = nextBase.groups.some((entry) => entry.id === payload.groupId);
+          return {
+            ...nextBase,
+            groups: existing
+              ? nextBase.groups.map((entry) => (entry.id === payload.groupId ? group : entry))
+              : [...nextBase.groups, group],
+          };
+        }),
+      );
+
+    case "group.renamed":
+      return decodeForEvent(GroupRenamedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          groups: nextBase.groups.map((group) =>
+            group.id === payload.groupId
+              ? { ...group, name: payload.name, updatedAt: payload.updatedAt }
+              : group,
+          ),
+        })),
+      );
+
+    case "group.member-assigned":
+      return decodeForEvent(GroupMemberAssignedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const group = nextBase.groups.find((entry) => entry.id === payload.groupId);
+          if (!group) return nextBase;
+          const members = group.members.some((member) => member.botId === payload.member.botId)
+            ? group.members.map((member) =>
+                member.botId === payload.member.botId ? payload.member : member,
+              )
+            : [...group.members, payload.member];
+          return {
+            ...nextBase,
+            groups: updateGroup(nextBase.groups, payload.groupId, {
+              members,
+              bossBotId: payload.member.role === "boss" ? payload.member.botId : group.bossBotId,
+              updatedAt: payload.updatedAt,
+            }),
+          };
+        }),
+      );
+
+    case "group.member-unassigned":
+      return decodeForEvent(
+        GroupMemberUnassignedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          groups: updateGroup(nextBase.groups, payload.groupId, {
+            members:
+              nextBase.groups
+                .find((group) => group.id === payload.groupId)
+                ?.members.filter((member) => member.botId !== payload.botId) ?? [],
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "group.boss-set":
+      return decodeForEvent(GroupBossSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const group = nextBase.groups.find((entry) => entry.id === payload.groupId);
+          if (!group) return nextBase;
+          let members = group.members.filter((member) => member.botId !== payload.bossBotId);
+          if (payload.previousBossBotId !== null) {
+            members = members.filter((member) => member.botId !== payload.previousBossBotId);
+            if (payload.previousBossRole === "specialist") {
+              members = [...members, { botId: payload.previousBossBotId, role: "specialist" }];
+            }
+          }
+          members = [...members, { botId: payload.bossBotId, role: "boss" }];
+          return {
+            ...nextBase,
+            groups: updateGroup(nextBase.groups, payload.groupId, {
+              bossBotId: payload.bossBotId,
+              members,
+              updatedAt: payload.updatedAt,
+            }),
+          };
+        }),
+      );
+
+    case "mcp-server.created":
+    case "mcp-server.updated":
+    case "mcp-server.enabled":
+    case "mcp-server.disabled": {
+      return decodeForEvent(McpServerCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const mcpServers = nextBase.mcpServers ?? [];
+          return {
+            ...nextBase,
+            mcpServers: mcpServers.some((entry) => entry.id === payload.mcpServer.id)
+              ? mcpServers.map((entry) =>
+                  entry.id === payload.mcpServer.id ? payload.mcpServer : entry,
+                )
+              : [...mcpServers, payload.mcpServer],
+          };
+        }),
+      );
+    }
+
+    case "mcp-server.deleted":
+      return decodeForEvent(McpServerDeletedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          mcpServers: (nextBase.mcpServers ?? []).filter(
+            (entry) => entry.id !== payload.mcpServerId,
+          ),
+        })),
+      );
+
+    case "group.deleted":
+      return decodeForEvent(GroupDeletedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          groups: nextBase.groups.filter((group) => group.id !== payload.groupId),
+        })),
+      );
+
     case "thread.created":
       return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
@@ -291,6 +539,9 @@ export function projectEvent(
           {
             id: payload.threadId,
             projectId: payload.projectId,
+            botId: payload.botId ?? null,
+            groupId: payload.groupId ?? null,
+            respondingBotId: null,
             title: payload.title,
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
@@ -524,6 +775,9 @@ export function projectEvent(
             text: payload.text,
             ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
             turnId: payload.turnId,
+            ...(payload.respondingBotId !== undefined
+              ? { respondingBotId: payload.respondingBotId }
+              : {}),
             streaming: payload.streaming,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -546,6 +800,9 @@ export function projectEvent(
                     streaming: message.streaming,
                     updatedAt: message.updatedAt,
                     turnId: message.turnId,
+                    ...(message.respondingBotId !== undefined
+                      ? { respondingBotId: message.respondingBotId }
+                      : {}),
                     ...(message.attachments !== undefined
                       ? { attachments: message.attachments }
                       : {}),
@@ -563,6 +820,22 @@ export function projectEvent(
           }),
         };
       });
+
+    case "thread.turn-start-requested":
+      return decodeForEvent(
+        ThreadTurnStartRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            respondingBotId: payload.respondingBotId ?? null,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
 
     case "thread.session-set":
       return Effect.gen(function* () {
@@ -609,6 +882,7 @@ export function projectEvent(
                       thread.latestTurn?.turnId === session.activeTurnId
                         ? thread.latestTurn.assistantMessageId
                         : null,
+                    respondingBotId: thread.respondingBotId ?? null,
                   }
                 : thread.latestTurn !== null &&
                     thread.latestTurn.state === "running" &&
@@ -728,6 +1002,7 @@ export function projectEvent(
                       : payload.completedAt,
                   completedAt: payload.completedAt,
                   assistantMessageId: payload.assistantMessageId,
+                  respondingBotId: thread.respondingBotId ?? null,
                 },
             updatedAt: event.occurredAt,
           }),

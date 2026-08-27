@@ -118,6 +118,8 @@ describe("OrchestrationEngine", () => {
     const projectionSnapshot = {
       snapshotSequence: 7,
       updatedAt: "2026-03-03T00:00:04.000Z",
+      bots: [],
+      groups: [],
       projects: [
         {
           id: asProjectId("project-bootstrap"),
@@ -185,6 +187,8 @@ describe("OrchestrationEngine", () => {
           getShellSnapshot: () =>
             Effect.succeed({
               snapshotSequence: projectionSnapshot.snapshotSequence,
+              bots: [],
+              groups: [],
               projects: [],
               threads: [],
               updatedAt: projectionSnapshot.updatedAt,
@@ -192,6 +196,8 @@ describe("OrchestrationEngine", () => {
           getArchivedShellSnapshot: () =>
             Effect.succeed({
               snapshotSequence: projectionSnapshot.snapshotSequence,
+              bots: [],
+              groups: [],
               projects: [],
               threads: [],
               updatedAt: projectionSnapshot.updatedAt,

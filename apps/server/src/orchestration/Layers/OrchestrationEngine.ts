@@ -1,4 +1,7 @@
 import type {
+  BotId,
+  GroupId,
+  McpServerId,
   OrchestrationClientOrigin,
   OrchestrationEvent,
   OrchestrationReadModel,
@@ -61,8 +64,8 @@ interface CommandEnvelope {
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
-  readonly aggregateKind: "project" | "thread";
-  readonly aggregateId: ProjectId | ThreadId;
+  readonly aggregateKind: "project" | "bot" | "group" | "mcp-server" | "thread";
+  readonly aggregateId: ProjectId | BotId | GroupId | McpServerId | ThreadId;
 } {
   switch (command.type) {
     case "project.create":
@@ -71,6 +74,33 @@ function commandToAggregateRef(command: OrchestrationCommand): {
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,
+      };
+    case "bot.create":
+    case "bot.update":
+    case "bot.archive":
+    case "bot.restore":
+      return {
+        aggregateKind: "bot",
+        aggregateId: command.botId,
+      };
+    case "group.create":
+    case "group.rename":
+    case "group.delete":
+    case "group.member.assign":
+    case "group.member.unassign":
+    case "group.boss.set":
+      return {
+        aggregateKind: "group",
+        aggregateId: command.groupId,
+      };
+    case "mcp-server.create":
+    case "mcp-server.update":
+    case "mcp-server.delete":
+    case "mcp-server.enable":
+    case "mcp-server.disable":
+      return {
+        aggregateKind: "mcp-server",
+        aggregateId: command.mcpServerId,
       };
     default:
       return {

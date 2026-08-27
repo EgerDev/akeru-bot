@@ -23,9 +23,6 @@ import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
-import { pullRequestHttpApiLayer } from "./pullRequest/http.ts";
-import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderRegistry.ts";
-import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
@@ -34,6 +31,8 @@ import * as ProviderSessionRuntime from "./persistence/ProviderSessionRuntime.ts
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
+import { AgentControllerLive } from "./provider/Layers/AgentController.ts";
+import { LegacyProviderBridgeLive } from "./provider/Layers/LegacyProviderBridge.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
@@ -264,10 +263,16 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
 // `create()`; `ProviderEventLoggers.layer` owns the shared native/canonical
 // NDJSON writers and is provided at the outer runtime layer so both
 // `ProviderService` and the per-instance drivers read the same logger pair.
-const ProviderLayerLive = ProviderServiceLive.pipe(
+const ProviderServiceLayerLive = ProviderServiceLive.pipe(
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );
+
+const LegacyProviderLayerLive = LegacyProviderBridgeLive.pipe(
+  Layer.provide(ProviderServiceLayerLive),
+);
+
+const ProviderLayerLive = AgentControllerLive.pipe(Layer.provide(LegacyProviderLayerLive));
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
@@ -369,6 +374,7 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
 );
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
+  Layer.provideMerge(ProviderSessionDirectoryLayerLive),
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
 );
@@ -444,21 +450,12 @@ const commandReadinessLayer = HttpRouter.middleware(
   { global: true },
 );
 
-const PullRequestServiceLive = PullRequestService.layer.pipe(
-  // One registry entry per supported host; the service only knows the registry.
-  Layer.provide(PullRequestProviderRegistry.layer),
-  Layer.provide(SourceControlProviderRegistryLayerLive),
-  Layer.provide(SourceControlRateLimit.layer),
-  Layer.provide(VcsProcess.layer),
-);
-
 export const makeRoutesLayer = Layer.mergeAll(
   Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(authHttpApiLayer),
       Layer.provide(connectHttpApiLayer),
       Layer.provide(orchestrationHttpApiLayer),
-      Layer.provide(pullRequestHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
@@ -470,9 +467,6 @@ export const makeRoutesLayer = Layer.mergeAll(
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(
-  // Both transports consume the same service instance, so caches single-flight across clients
-  // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
-  Layer.provide(PullRequestServiceLive),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer),
   Layer.provide(commandReadinessLayer),

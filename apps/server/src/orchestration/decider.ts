@@ -1,5 +1,8 @@
 import {
+  BotId,
   EventId,
+  GroupId,
+  ProviderInstanceId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -12,7 +15,16 @@ import type * as PlatformError from "effect/PlatformError";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
   listThreadsByProjectId,
+  requireActiveGroupMember,
   requireActiveProjectWorkspaceRootAbsent,
+  requireBot,
+  requireBotAbsent,
+  requireBotArchived,
+  requireBotNotArchived,
+  requireGroup,
+  requireGroupAbsent,
+  requireMcpServer,
+  requireMcpServerAbsent,
   requireProject,
   requireProjectAbsent,
   requireThread,
@@ -139,6 +151,30 @@ function threadHasQueuedTurnStart(
     Number.isFinite(latestUserMessageAtMs) &&
     latestUserMessageAtMs > latestTurnAtMs &&
     Math.abs(queuedAgeMs) <= QUEUED_TURN_START_GRACE_MS
+  );
+}
+
+function botGroupUpdatedEvent(input: {
+  readonly botId: BotId;
+  readonly groupId: GroupId | null;
+  readonly occurredAt: string;
+  readonly commandId: OrchestrationCommand["commandId"];
+}): Effect.Effect<PlannedOrchestrationEvent, PlatformError.PlatformError, Crypto.Crypto> {
+  return withEventBase({
+    aggregateKind: "bot",
+    aggregateId: input.botId,
+    occurredAt: input.occurredAt,
+    commandId: input.commandId,
+  }).pipe(
+    Effect.map((base) => ({
+      ...base,
+      type: "bot.updated" as const,
+      payload: {
+        botId: input.botId,
+        groupId: input.groupId,
+        updatedAt: input.occurredAt,
+      },
+    })),
   );
 }
 
@@ -349,12 +385,617 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "bot.create": {
+      yield* requireBotAbsent({ readModel, command, botId: command.botId });
+      const group =
+        command.groupId === null
+          ? null
+          : yield* requireGroup({ readModel, command, groupId: command.groupId });
+      const botCreatedEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "bot",
+          aggregateId: command.botId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "bot.created",
+        payload: {
+          botId: command.botId,
+          name: command.name,
+          title: command.title,
+          label: command.label ?? null,
+          description: command.description ?? null,
+          disabledMcpServerIds: command.disabledMcpServerIds ?? [],
+          avatar: command.avatar,
+          engine: command.engine,
+          sandbox: command.sandbox,
+          runtimeMode: command.runtimeMode,
+          usageCap: command.usageCap,
+          groupId: command.groupId,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      if (group === null || group.members.some((member) => member.botId === command.botId)) {
+        return botCreatedEvent;
+      }
+      return [
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "group",
+            aggregateId: group.id,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "group.member-assigned",
+          payload: {
+            groupId: group.id,
+            member: { botId: command.botId, role: "specialist" },
+            updatedAt: command.createdAt,
+          },
+        },
+        botCreatedEvent,
+      ];
+    }
+
+    case "bot.update": {
+      const bot = yield* requireBot({ readModel, command, botId: command.botId });
+      const targetGroup =
+        command.groupId == null
+          ? null
+          : yield* requireGroup({ readModel, command, groupId: command.groupId });
+      if (command.groupId !== undefined && command.groupId !== null) {
+        yield* requireBotNotArchived({ readModel, command, botId: command.botId });
+      }
+      const sourceGroup =
+        command.groupId !== undefined && bot.groupId !== null && bot.groupId !== command.groupId
+          ? readModel.groups.find((group) => group.id === bot.groupId)
+          : undefined;
+      const sourceMembership = sourceGroup?.members.find((member) => member.botId === bot.id);
+      if (sourceGroup && (sourceMembership?.role === "boss" || sourceGroup.bossBotId === bot.id)) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot '${bot.id}' is the boss of group '${sourceGroup.id}'. Replace it with 'group.boss.set' before changing its group.`,
+          }),
+        );
+      }
+
+      const occurredAt = yield* nowIso;
+      const events: PlannedOrchestrationEvent[] = [];
+      if (sourceGroup && sourceMembership) {
+        events.push({
+          ...(yield* withEventBase({
+            aggregateKind: "group",
+            aggregateId: sourceGroup.id,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "group.member-unassigned",
+          payload: { groupId: sourceGroup.id, botId: bot.id, updatedAt: occurredAt },
+        });
+      }
+      if (
+        command.groupId !== undefined &&
+        targetGroup !== null &&
+        targetGroup.id !== bot.groupId &&
+        !targetGroup.members.some((member) => member.botId === bot.id)
+      ) {
+        events.push({
+          ...(yield* withEventBase({
+            aggregateKind: "group",
+            aggregateId: targetGroup.id,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "group.member-assigned",
+          payload: {
+            groupId: targetGroup.id,
+            member: { botId: bot.id, role: "specialist" },
+            updatedAt: occurredAt,
+          },
+        });
+      }
+      events.push({
+        ...(yield* withEventBase({
+          aggregateKind: "bot",
+          aggregateId: command.botId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "bot.updated",
+        payload: {
+          botId: command.botId,
+          ...(command.name !== undefined ? { name: command.name } : {}),
+          ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.label !== undefined ? { label: command.label } : {}),
+          ...(command.description !== undefined ? { description: command.description } : {}),
+          ...(command.disabledMcpServerIds !== undefined
+            ? { disabledMcpServerIds: command.disabledMcpServerIds }
+            : {}),
+          ...(command.avatar !== undefined ? { avatar: command.avatar } : {}),
+          ...(command.engine !== undefined ? { engine: command.engine } : {}),
+          ...(command.sandbox !== undefined ? { sandbox: command.sandbox } : {}),
+          ...(command.runtimeMode !== undefined ? { runtimeMode: command.runtimeMode } : {}),
+          ...(command.usageCap !== undefined ? { usageCap: command.usageCap } : {}),
+          ...(command.groupId !== undefined ? { groupId: command.groupId } : {}),
+          updatedAt: occurredAt,
+        },
+      });
+      return events;
+    }
+
+    case "bot.archive": {
+      yield* requireBotNotArchived({ readModel, command, botId: command.botId });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "bot",
+          aggregateId: command.botId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "bot.archived",
+        payload: {
+          botId: command.botId,
+          archivedAt: occurredAt,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "bot.restore": {
+      yield* requireBotArchived({ readModel, command, botId: command.botId });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "bot",
+          aggregateId: command.botId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "bot.restored",
+        payload: {
+          botId: command.botId,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "group.create": {
+      yield* requireGroupAbsent({ readModel, command, groupId: command.groupId });
+      if (command.bossBotId === undefined) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "A group requires a boss bot.",
+          }),
+        );
+      }
+
+      const memberBotIds = [
+        command.bossBotId,
+        ...new Set((command.specialistBotIds ?? []).filter((botId) => botId !== command.bossBotId)),
+      ];
+      const memberBots = yield* Effect.forEach(memberBotIds, (botId) =>
+        requireBotNotArchived({ readModel, command, botId }),
+      );
+      const assignedBot = memberBots.find((bot) => bot.groupId !== null);
+      if (assignedBot) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot '${assignedBot.id}' already belongs to group '${assignedBot.groupId}'.`,
+          }),
+        );
+      }
+
+      const groupCreatedEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "group",
+          aggregateId: command.groupId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "group.created",
+        payload: {
+          groupId: command.groupId,
+          name: command.name,
+          bossBotId: command.bossBotId,
+          members: memberBotIds.map((botId) => ({
+            botId,
+            role: botId === command.bossBotId ? ("boss" as const) : ("specialist" as const),
+          })),
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      const botUpdatedEvents = yield* Effect.forEach(memberBotIds, (botId) =>
+        botGroupUpdatedEvent({
+          botId,
+          groupId: command.groupId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+      );
+      return [groupCreatedEvent, ...botUpdatedEvents];
+    }
+
+    case "group.rename": {
+      yield* requireGroup({ readModel, command, groupId: command.groupId });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "group",
+          aggregateId: command.groupId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "group.renamed",
+        payload: {
+          groupId: command.groupId,
+          name: command.name,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "group.delete": {
+      const group = yield* requireGroup({ readModel, command, groupId: command.groupId });
+      const occurredAt = yield* nowIso;
+      const deletedEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "group",
+          aggregateId: command.groupId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "group.deleted",
+        payload: {
+          groupId: command.groupId,
+          deletedAt: occurredAt,
+        },
+      };
+      const botUpdatedEvents = yield* Effect.forEach(
+        group.members.filter(
+          (member) =>
+            readModel.bots.find((bot) => bot.id === member.botId)?.groupId === command.groupId,
+        ),
+        (member) =>
+          botGroupUpdatedEvent({
+            botId: member.botId,
+            groupId: null,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+      );
+      return [deletedEvent, ...botUpdatedEvents];
+    }
+
+    case "group.member.assign": {
+      const group = yield* requireGroup({ readModel, command, groupId: command.groupId });
+      const bot = yield* requireBotNotArchived({ readModel, command, botId: command.botId });
+      if (bot.groupId !== null && bot.groupId !== command.groupId) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot '${bot.id}' already belongs to group '${bot.groupId}'.`,
+          }),
+        );
+      }
+      if (command.role === "boss" && group.bossBotId !== null && group.bossBotId !== bot.id) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Group '${group.id}' already has boss bot '${group.bossBotId}'. Use 'group.boss.set' to replace it.`,
+          }),
+        );
+      }
+      if (command.role === "specialist" && group.bossBotId === bot.id) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot '${bot.id}' is the boss of group '${group.id}' and cannot be assigned as a specialist.`,
+          }),
+        );
+      }
+      const occurredAt = yield* nowIso;
+      const assignedEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "group",
+          aggregateId: group.id,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "group.member-assigned",
+        payload: {
+          groupId: group.id,
+          member: { botId: bot.id, role: command.role },
+          updatedAt: occurredAt,
+        },
+      };
+      if (bot.groupId === group.id) return assignedEvent;
+      return [
+        assignedEvent,
+        yield* botGroupUpdatedEvent({
+          botId: bot.id,
+          groupId: group.id,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+      ];
+    }
+
+    case "group.member.unassign": {
+      const group = yield* requireGroup({ readModel, command, groupId: command.groupId });
+      const member = group.members.find((entry) => entry.botId === command.botId);
+      if (!member) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot '${command.botId}' is not a member of group '${group.id}'.`,
+          }),
+        );
+      }
+      if (member.role === "boss" || group.bossBotId === command.botId) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot '${command.botId}' is the last boss of group '${group.id}'. Set a new boss and unassign the previous boss with one 'group.boss.set' command.`,
+          }),
+        );
+      }
+      const occurredAt = yield* nowIso;
+      const unassignedEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "group",
+          aggregateId: group.id,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "group.member-unassigned",
+        payload: {
+          groupId: group.id,
+          botId: command.botId,
+          updatedAt: occurredAt,
+        },
+      };
+      const bot = yield* requireBot({ readModel, command, botId: command.botId });
+      if (bot.groupId !== group.id) return unassignedEvent;
+      return [
+        unassignedEvent,
+        yield* botGroupUpdatedEvent({
+          botId: bot.id,
+          groupId: null,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+      ];
+    }
+
+    case "group.boss.set": {
+      const group = yield* requireGroup({ readModel, command, groupId: command.groupId });
+      const nextBoss = yield* requireBotNotArchived({
+        readModel,
+        command,
+        botId: command.bossBotId,
+      });
+      if (nextBoss.groupId !== null && nextBoss.groupId !== group.id) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot '${nextBoss.id}' already belongs to group '${nextBoss.groupId}'.`,
+          }),
+        );
+      }
+      if (group.bossBotId === nextBoss.id && command.unassignPreviousBoss === true) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot '${nextBoss.id}' is already the boss and cannot replace and unassign itself.`,
+          }),
+        );
+      }
+
+      const occurredAt = yield* nowIso;
+      const previousBossBotId = group.bossBotId;
+      const previousBossRole =
+        previousBossBotId === null || previousBossBotId === nextBoss.id
+          ? null
+          : command.unassignPreviousBoss === true
+            ? ("unassigned" as const)
+            : ("specialist" as const);
+      const bossSetEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "group",
+          aggregateId: group.id,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "group.boss-set",
+        payload: {
+          groupId: group.id,
+          bossBotId: nextBoss.id,
+          previousBossBotId,
+          previousBossRole,
+          updatedAt: occurredAt,
+        },
+      };
+      const events: PlannedOrchestrationEvent[] = [bossSetEvent];
+      if (nextBoss.groupId !== group.id) {
+        events.push(
+          yield* botGroupUpdatedEvent({
+            botId: nextBoss.id,
+            groupId: group.id,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+        );
+      }
+      if (previousBossRole === "unassigned" && previousBossBotId !== null) {
+        const previousBoss = readModel.bots.find((bot) => bot.id === previousBossBotId);
+        if (previousBoss?.groupId === group.id) {
+          events.push(
+            yield* botGroupUpdatedEvent({
+              botId: previousBoss.id,
+              groupId: null,
+              occurredAt,
+              commandId: command.commandId,
+            }),
+          );
+        }
+      }
+      return events;
+    }
+
+    case "mcp-server.create": {
+      yield* requireMcpServerAbsent({
+        readModel,
+        command,
+        mcpServerId: command.mcpServerId,
+      });
+      const mcpServer =
+        command.transport === "stdio"
+          ? {
+              id: command.mcpServerId,
+              name: command.name,
+              transport: command.transport,
+              command: command.command,
+              ...(command.args !== undefined ? { args: command.args } : {}),
+              enabled: true,
+              createdAt: command.createdAt,
+              updatedAt: command.createdAt,
+            }
+          : {
+              id: command.mcpServerId,
+              name: command.name,
+              transport: command.transport,
+              url: command.url,
+              enabled: true,
+              createdAt: command.createdAt,
+              updatedAt: command.createdAt,
+            };
+
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mcp-server",
+          aggregateId: command.mcpServerId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "mcp-server.created",
+        payload: { mcpServer },
+      };
+    }
+
+    case "mcp-server.update": {
+      const existing = yield* requireMcpServer({
+        readModel,
+        command,
+        mcpServerId: command.mcpServerId,
+      });
+      const occurredAt = yield* nowIso;
+      const mcpServer =
+        command.transport === "stdio"
+          ? {
+              id: existing.id,
+              name: command.name,
+              transport: command.transport,
+              command: command.command,
+              ...(command.args !== undefined ? { args: command.args } : {}),
+              enabled: existing.enabled,
+              createdAt: existing.createdAt,
+              updatedAt: occurredAt,
+            }
+          : {
+              id: existing.id,
+              name: command.name,
+              transport: command.transport,
+              url: command.url,
+              enabled: existing.enabled,
+              createdAt: existing.createdAt,
+              updatedAt: occurredAt,
+            };
+
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mcp-server",
+          aggregateId: command.mcpServerId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "mcp-server.updated",
+        payload: { mcpServer },
+      };
+    }
+
+    case "mcp-server.delete": {
+      yield* requireMcpServer({
+        readModel,
+        command,
+        mcpServerId: command.mcpServerId,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mcp-server",
+          aggregateId: command.mcpServerId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "mcp-server.deleted",
+        payload: {
+          mcpServerId: command.mcpServerId,
+          deletedAt: occurredAt,
+        },
+      };
+    }
+
+    case "mcp-server.enable":
+    case "mcp-server.disable": {
+      const existing = yield* requireMcpServer({
+        readModel,
+        command,
+        mcpServerId: command.mcpServerId,
+      });
+      const occurredAt = yield* nowIso;
+      const enabled = command.type === "mcp-server.enable";
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "mcp-server",
+          aggregateId: command.mcpServerId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: enabled ? "mcp-server.enabled" : "mcp-server.disabled",
+        payload: {
+          mcpServer: {
+            ...existing,
+            enabled,
+            updatedAt: occurredAt,
+          },
+        },
+      };
+    }
+
     case "thread.create": {
       yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
       });
+      if (command.botId != null && command.groupId != null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A thread cannot belong to both a bot and a group.",
+        });
+      }
+      if (command.botId != null) {
+        yield* requireBotNotArchived({ readModel, command, botId: command.botId });
+      }
+      if (command.groupId != null) {
+        yield* requireGroup({ readModel, command, groupId: command.groupId });
+      }
       yield* requireThreadAbsent({
         readModel,
         command,
@@ -371,6 +1012,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           projectId: command.projectId,
+          botId: command.botId ?? null,
+          groupId: command.groupId ?? null,
           title: command.title,
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
@@ -956,6 +1599,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
+
+      let respondingBotId = targetThread.botId ?? null;
+      let respondingBot =
+        respondingBotId === null
+          ? null
+          : yield* requireBot({ readModel, command, botId: respondingBotId });
+      if (targetThread.groupId !== null && targetThread.groupId !== undefined) {
+        const group = yield* requireGroup({
+          readModel,
+          command,
+          groupId: targetThread.groupId,
+        });
+        const selectedBotId = command.respondingBotId ?? group.bossBotId;
+        if (selectedBotId === null) {
+          return yield* Effect.fail(
+            new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Group '${group.id}' has no boss bot that can respond.`,
+            }),
+          );
+        }
+        respondingBot = yield* requireActiveGroupMember({
+          readModel,
+          command,
+          groupId: group.id,
+          botId: selectedBotId,
+        });
+        respondingBotId = selectedBotId;
+      } else if (command.respondingBotId !== undefined) {
+        return yield* Effect.fail(
+          new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Bot mentions can only route turns on a group-owned thread.`,
+          }),
+        );
+      }
+
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -988,13 +1668,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
-          ...(command.modelSelection !== undefined
-            ? { modelSelection: command.modelSelection }
-            : {}),
+          ...(respondingBot?.engine !== null && respondingBot?.engine !== undefined
+            ? {
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make(respondingBot.engine.provider),
+                  model: respondingBot.engine.model,
+                },
+              }
+            : command.modelSelection !== undefined
+              ? { modelSelection: command.modelSelection }
+              : {}),
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+          respondingBotId,
           createdAt: command.createdAt,
         },
       };
@@ -1229,7 +1917,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.message.assistant.delta": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
@@ -1248,6 +1936,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           role: "assistant",
           text: command.delta,
           turnId: command.turnId ?? null,
+          respondingBotId: thread.respondingBotId ?? null,
           streaming: true,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
@@ -1256,7 +1945,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.message.assistant.complete": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
@@ -1275,6 +1964,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           role: "assistant",
           text: "",
           turnId: command.turnId ?? null,
+          respondingBotId: thread.respondingBotId ?? null,
           streaming: false,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,

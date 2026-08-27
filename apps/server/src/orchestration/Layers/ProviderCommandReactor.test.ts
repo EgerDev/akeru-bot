@@ -13,6 +13,7 @@ import {
 import { createModelSelection } from "@t3tools/shared/model";
 import {
   ApprovalRequestId,
+  BotId,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -34,14 +35,18 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "@t3tools/contracts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import {
+  AgentControllerUnsupportedEngineError,
+  ProviderAdapterRequestError,
+} from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
+import { ProjectionBotRepositoryLive } from "../../persistence/Layers/ProjectionBots.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import {
-  ProviderService,
-  type ProviderServiceShape,
-} from "../../provider/Services/ProviderService.ts";
+  AgentController,
+  type AgentControllerShape,
+} from "../../provider/Services/AgentController.ts";
 import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegistryMock.ts";
 import { TextGeneration, type TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
@@ -54,6 +59,7 @@ import {
   providerErrorLabel,
   providerErrorLabelFromInstanceHint,
   ProviderCommandReactorLive,
+  resolveControllerBotId,
 } from "./ProviderCommandReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
@@ -92,6 +98,17 @@ async function waitFor(
 }
 
 describe("ProviderCommandReactor", () => {
+  it("uses the responding group member before a direct thread bot", () => {
+    expect(
+      resolveControllerBotId({
+        botId: BotId.make("bot-owner"),
+        respondingBotId: BotId.make("bot-specialist"),
+      }),
+    ).toBe("bot-specialist");
+    expect(resolveControllerBotId({ botId: BotId.make("bot-owner"), respondingBotId: null })).toBe(
+      "bot-owner",
+    );
+  });
   let runtime: ManagedRuntime.ManagedRuntime<
     OrchestrationEngineService | ProviderCommandReactor | ProjectionSnapshotQuery,
     unknown
@@ -155,6 +172,8 @@ describe("ProviderCommandReactor", () => {
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
+    readonly botEngine?: { readonly provider: string; readonly model: string } | null;
+    readonly unavailableEngine?: boolean;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir =
@@ -238,8 +257,8 @@ describe("ProviderCommandReactor", () => {
       }),
     );
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
-    const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
-    const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
+    const respondToRequest = vi.fn<AgentControllerShape["respondToRequest"]>(() => Effect.void);
+    const respondToUserInput = vi.fn<AgentControllerShape["respondToUserInput"]>(() => Effect.void);
     const stopSession = vi.fn((stopInput: unknown) =>
       (input?.stopSessionEffect?.() ?? Effect.void).pipe(
         Effect.tap(() =>
@@ -318,26 +337,15 @@ describe("ProviderCommandReactor", () => {
       },
     ];
 
-    const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
-    const service: ProviderServiceShape = {
-      startSession: startSession as ProviderServiceShape["startSession"],
-      sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
-      interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
-      respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
-      respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
-      stopSession: stopSession as ProviderServiceShape["stopSession"],
-      listSessions: () => Effect.succeed(runtimeSessions),
-      getCapabilities: (_provider) =>
-        Effect.succeed({
-          sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
-        }),
-      getInstanceInfo: (instanceId) => {
-        const raw = String(instanceId);
-        const driverKind = ProviderDriverKind.make(
-          raw.startsWith("claude") ? "claudeAgent" : raw.startsWith("codex") ? "codex" : raw,
-        );
-        return Effect.succeed({
-          instanceId,
+    const inspectEngine: AgentControllerShape["inspectEngine"] = (selected) => {
+      const raw = String(selected.instanceId);
+      const driverKind = ProviderDriverKind.make(
+        raw.startsWith("claude") ? "claudeAgent" : raw.startsWith("codex") ? "codex" : raw,
+      );
+      return Effect.succeed({
+        modelSelection: selected,
+        routing: {
+          instanceId: selected.instanceId,
           driverKind,
           displayName: undefined,
           enabled: true,
@@ -346,12 +354,47 @@ describe("ProviderCommandReactor", () => {
             continuationKey:
               driverKind === ProviderDriverKind.make("codex")
                 ? "codex:home:/shared-codex"
-                : `${driverKind}:instance:${instanceId}`,
+                : `${driverKind}:instance:${selected.instanceId}`,
           },
-        });
+        },
+        capabilities: {
+          sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
+        },
+      });
+    };
+    const resolveEngine = vi.fn<AgentControllerShape["resolveEngine"]>(
+      ({ engine, fallback, mode }) => {
+        if (input?.unavailableEngine === true && engine !== null) {
+          return Effect.fail(
+            new AgentControllerUnsupportedEngineError({
+              provider: engine.provider,
+              model: engine.model,
+              detail: `Provider instance '${engine.provider}' is not available.`,
+            }),
+          );
+        }
+        const selected =
+          engine === null
+            ? fallback
+            : {
+                instanceId: ProviderInstanceId.make(engine.provider),
+                model: engine.model,
+              };
+        return inspectEngine(selected).pipe(Effect.map((result) => ({ ...result, mode })));
       },
-      rollbackConversation: () => unsupported(),
-      uploadFeedback: () => unsupported(),
+    );
+    const service: AgentControllerShape = {
+      resolveEngine,
+      inspectEngine,
+      startSession: startSession as AgentControllerShape["startSession"],
+      sendTurn: sendTurn as AgentControllerShape["sendTurn"],
+      interruptTurn: interruptTurn as AgentControllerShape["interruptTurn"],
+      respondToRequest: respondToRequest as AgentControllerShape["respondToRequest"],
+      respondToUserInput: respondToUserInput as AgentControllerShape["respondToUserInput"],
+      stopSession: stopSession as AgentControllerShape["stopSession"],
+      listSessions: () => Effect.succeed(runtimeSessions),
+      rollbackConversation: () => Effect.die("unused"),
+      uploadFeedback: () => Effect.die("unused"),
       get streamEvents() {
         return Stream.fromPubSub(runtimeEventPubSub);
       },
@@ -402,7 +445,8 @@ describe("ProviderCommandReactor", () => {
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(reactorOrchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
-      Layer.provideMerge(Layer.succeed(ProviderService, service)),
+      Layer.provideMerge(ProjectionBotRepositoryLive.pipe(Layer.provide(SqlitePersistenceMemory))),
+      Layer.provideMerge(Layer.succeed(AgentController, service)),
       Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
       Layer.provideMerge(
         Layer.mock(GitWorkflowService.GitWorkflowService)({
@@ -448,12 +492,31 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       }),
     );
+    if (input?.botEngine !== undefined) {
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "bot.create",
+          commandId: CommandId.make("cmd-bot-create"),
+          botId: BotId.make("bot-1"),
+          name: "Configured bot",
+          title: "Configured bot",
+          avatar: { kind: "dither", seed: "configured-bot" },
+          engine: input.botEngine,
+          sandbox: "local",
+          runtimeMode: "approval-required",
+          usageCap: null,
+          groupId: null,
+          createdAt: now,
+        }),
+      );
+    }
     await Effect.runPromise(
       engine.dispatch({
         type: "thread.create",
         commandId: CommandId.make("cmd-thread-create"),
         threadId: ThreadId.make("thread-1"),
         projectId: asProjectId("project-1"),
+        ...(input?.botEngine !== undefined ? { botId: BotId.make("bot-1") } : {}),
         title: "Thread",
         modelSelection: modelSelection,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -506,6 +569,7 @@ describe("ProviderCommandReactor", () => {
     return {
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
+      resolveEngine,
       startSession,
       sendTurn,
       interruptTurn,
@@ -528,7 +592,7 @@ describe("ProviderCommandReactor", () => {
     };
   }
 
-  it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
+  it("routes thread.turn.start through AgentController before sending the provider turn", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
 
@@ -551,6 +615,15 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.resolveEngine).toHaveBeenCalledWith({
+      threadId: ThreadId.make("thread-1"),
+      engine: null,
+      fallback: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      mode: "default",
+    });
     expect(harness.startSession.mock.calls[0]?.[0]).toEqual(ThreadId.make("thread-1"));
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
       cwd: "/tmp/provider-project",
@@ -558,6 +631,7 @@ describe("ProviderCommandReactor", () => {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5-codex",
       },
+      mcpServers: [],
       runtimeMode: "approval-required",
     });
 
@@ -566,6 +640,89 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("uses the configured bot engine instead of the thread default", async () => {
+    const harness = await createHarness({
+      botEngine: { provider: "claudeAgent", model: "claude-fable-5" },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-configured-bot"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-configured-bot"),
+          role: "user",
+          text: "use the bot engine",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    expect(harness.resolveEngine).toHaveBeenCalledWith({
+      threadId: ThreadId.make("thread-1"),
+      engine: { provider: "claudeAgent", model: "claude-fable-5" },
+      fallback: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-fable-5",
+      },
+      mode: "default",
+    });
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      provider: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-fable-5",
+      },
+    });
+  });
+
+  it("projects a typed failure when the configured bot engine is unavailable", async () => {
+    const harness = await createHarness({
+      botEngine: { provider: "missing", model: "missing-model" },
+      unavailableEngine: true,
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-missing-bot-engine"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-missing-bot-engine"),
+          role: "user",
+          text: "use missing engine",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.resolveEngine.mock.calls.length === 1);
+    await harness.drain();
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make("thread-1"),
+    );
+    expect(thread?.activities).toContainEqual(
+      expect.objectContaining({
+        kind: "provider.turn.start.failed",
+        payload: {
+          detail: "Provider instance 'missing' is not available.",
+        },
+      }),
+    );
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>
@@ -2370,7 +2527,7 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("full-access");
   });
 
-  it("rejects provider changes after a thread is already bound to a session provider", async () => {
+  it("restarts the session when a turn changes provider", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
 
@@ -2415,34 +2572,30 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await waitFor(async () => {
-      const readModel = await harness.readModel();
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      return (
-        thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
-        false
-      );
-    });
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
 
-    expect(harness.startSession.mock.calls.length).toBe(1);
-    expect(harness.sendTurn.mock.calls.length).toBe(1);
-    expect(harness.stopSession.mock.calls.length).toBe(0);
+    expect(harness.stopSession).toHaveBeenCalledOnce();
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      provider: "claudeAgent",
+      providerInstanceId: "claudeAgent",
+      modelSelection: {
+        instanceId: "claudeAgent",
+        model: "claude-opus-4-6",
+      },
+    });
 
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
-    expect(thread?.session?.providerName).toBe("codex");
+    expect(thread?.session?.providerName).toBe("claudeAgent");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
     expect(
-      thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
-    ).toMatchObject({
-      payload: {
-        detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
-      },
-    });
+      thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed"),
+    ).toBe(false);
   });
 
-  it("rejects cross-driver provider changes after the existing thread session has stopped", async () => {
+  it("starts a new provider after the previous thread session stopped", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
 
@@ -2486,26 +2639,20 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await waitFor(async () => {
-      const readModel = await harness.readModel();
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      return (
-        thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
-        false
-      );
-    });
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
 
-    expect(harness.startSession.mock.calls.length).toBe(0);
-    expect(harness.sendTurn.mock.calls.length).toBe(0);
+    expect(harness.stopSession).not.toHaveBeenCalled();
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      provider: "claudeAgent",
+      providerInstanceId: "claudeAgent",
+    });
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.session?.providerName).toBe("claudeAgent");
     expect(
-      thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
-    ).toMatchObject({
-      payload: {
-        detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
-      },
-    });
+      thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed"),
+    ).toBe(false);
   });
 
   it("reacts to thread.turn.interrupt-requested by calling provider interrupt", async () => {
