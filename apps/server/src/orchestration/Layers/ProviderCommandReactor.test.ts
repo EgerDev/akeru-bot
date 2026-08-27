@@ -632,6 +632,7 @@ describe("ProviderCommandReactor", () => {
         model: "gpt-5-codex",
       },
       mcpServers: [],
+      botSandbox: null,
       runtimeMode: "approval-required",
     });
 
@@ -682,6 +683,7 @@ describe("ProviderCommandReactor", () => {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-fable-5",
       },
+      botSandbox: "local",
     });
   });
 

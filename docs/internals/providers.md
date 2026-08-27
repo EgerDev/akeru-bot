@@ -38,15 +38,18 @@ directory to route session and turn operations for a thread, so callers name a t
 
 Desktop chat does not call `ProviderService` directly from orchestration. The command reactor calls
 Akeru's [`AgentController`][controller]. Codex threads run through Akeru's custom Mastra Core
-controller and call `Session.sendMessage()`. The backing coding agent has no Mastra memory or task
-signals. Akeru builds its workspace and MCP tools per thread, and resolves the selected Codex model
-through an explicit subscription `AuthStorage`. AgentController maps Mastra message, tool, approval,
-usage, completion, and error events to `ProviderRuntimeEvent`.
+controller and call `Session.sendMessage()`. The backing agent is a general-purpose Akeru assistant
+with no Mastra memory or task signals. Akeru builds workspace and enabled plugin tools per thread, and
+resolves the selected Codex model through an explicit subscription `AuthStorage`. AgentController
+maps Mastra message, tool, approval, usage, completion, and error events to
+`ProviderRuntimeEvent`.
 
 Claude, Cursor, Grok, and OpenCode keep their existing adapters. [`LegacyProviderBridge`][bridge]
-routes those providers through `ProviderService` and forwards their canonical runtime events. It is
-not the Codex turn path and AgentController never falls back to the legacy Codex loop when a Mastra
-session is absent.
+routes those providers through `ProviderService` and forwards their canonical runtime events. Claude
+receives the same general-purpose Akeru instructions and enabled MCP servers. A provider change stops
+the active runtime and starts the selected provider without reusing an incompatible resume cursor. The
+bridge is not the Codex turn path, and AgentController never falls back to the legacy Codex loop when
+a Mastra session is absent.
 
 `BotEngine.provider` stores the selected provider instance ID. AgentController keeps that instance
 when it creates a runtime session, so selecting a model keeps the subscription and custom instance

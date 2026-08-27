@@ -9,15 +9,21 @@ packages:
 # true = allowed to run build scripts; false mirrors the pnpm 10 behavior
 # where anything outside onlyBuiltDependencies was silently not built.
 allowBuilds:
+  "@google/genai": false
+  agent-browser: false
   browser-tabs-lock: false
   bufferutil: false
   core-js: false
+  edgedriver: false
   electron: true
   electron-winstaller: false
   esbuild: true
+  geckodriver: false
   msgpackr-extract: true
   msw: false
   node-pty: true
+  onnxruntime-node: false
+  protobufjs: false
   sharp: true
   utf-8-validate: false
   workerd: false
@@ -76,6 +82,9 @@ minimumReleaseAgeExclude:
   - alchemy@2.0.0-beta.65
   - effect@4.0.0-beta.103
   - "@legendapp/list@3.3.5"
+  - "@mastra/code-sdk@1.5.1"
+  - "@mastra/core@1.63.0"
+  - "@mastra/observability@1.17.3"
 
 overrides:
   # The SDK always receives the user's Claude executable, so its bundled binaries are unused.
