@@ -1,6 +1,5 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -10,7 +9,6 @@ import {
   normalizePastedCloneUrl,
 } from "@t3tools/client-runtime/operations/projects";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import {
   canPreloadBrowsePath,
   createBrowseNavigationCoordinator,
@@ -19,7 +17,6 @@ import {
 } from "@t3tools/client-runtime/state/filesystem";
 import {
   isAtomCommandInterrupted,
-  settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -36,13 +33,15 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  BotIcon,
+  ChartNoAxesColumnIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
   LinkIcon,
-  MessageSquareIcon,
   PaletteIcon,
+  PuzzleIcon,
   ServerIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -78,7 +77,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
-import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
+import { resolveThreadActionProjectRef } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
   ensureBrowseDirectoryPath,
@@ -94,7 +93,6 @@ import { onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
-import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import {
   cn,
   getLocalFileManagerName,
@@ -103,7 +101,7 @@ import {
   newProjectId,
 } from "../lib/utils";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
+import { resolveThreadRouteTarget } from "../threadRoutes";
 import {
   applyWslEnvironmentConfiguration,
   parseWslUncPath,
@@ -114,6 +112,7 @@ import {
   ADDON_ICON_CLASS,
   browseInputEndPaddingClass,
   buildBrowseGroups,
+  buildModelPickerCommandPaletteAction,
   buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
@@ -140,18 +139,12 @@ import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
-import {
-  COMMAND_PALETTE_META_ICON_CLASS,
-  CommandPaletteMetaDot,
-  ThreadCommandSubtitle,
-} from "./ThreadCommandSubtitle";
-import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
+import { openSettings } from "~/settingsDialogStore";
+import { openPlugins } from "~/pluginsDialogStore";
+import { openUsage } from "~/usageDialogStore";
+import { COMMAND_PALETTE_META_ICON_CLASS, CommandPaletteMetaDot } from "./ThreadCommandSubtitle";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
-import {
-  deriveProviderInstanceEntries,
-  resolveDefaultProviderModelSelection,
-  type ProviderInstanceEntry,
-} from "../providerInstances";
+import { resolveDefaultProviderModelSelection } from "../providerInstances";
 import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindings";
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "./ui/command";
 import { Button } from "./ui/button";
@@ -563,6 +556,7 @@ function OpenCommandPaletteDialog(props: {
   readonly clearOpenIntent: () => void;
 }) {
   const navigate = useNavigate();
+  const composerHandleRef = useComposerHandleContext();
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -593,18 +587,6 @@ function OpenCommandPaletteDialog(props: {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const providers = useAtomValue(primaryServerProvidersAtom);
-  const providerEntryByEnvironmentAndInstanceId = useMemo(() => {
-    const map = new Map<string, ProviderInstanceEntry>();
-    for (const environment of environments) {
-      const environmentProviders =
-        environment.serverConfig?.providers ??
-        (environment.environmentId === primaryEnvironmentId ? providers : []);
-      for (const entry of deriveProviderInstanceEntries(environmentProviders)) {
-        map.set(`${environment.environmentId}:${entry.instanceId}`, entry);
-      }
-    }
-    return map;
-  }, [environments, primaryEnvironmentId, providers]);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
   const environmentIds = useMemo(
@@ -616,17 +598,6 @@ function OpenCommandPaletteDialog(props: {
   );
   const threadSearchQuery = currentView === null && !isActionsOnly ? deferredQuery : "";
   const threadSearch = useThreadSearch(environmentIds, threadSearchQuery);
-  const threadContentMatchByKey = useMemo(
-    () =>
-      new Map(
-        threadSearch.matches.flatMap((match) =>
-          match.source === "user" || match.source === "assistant"
-            ? [[threadSearchMatchKey(match), match] as const]
-            : [],
-        ),
-      ),
-    [threadSearch.matches],
-  );
   const [browseGeneration, setBrowseGeneration] = useState(0);
   const browseNavigationRef = useRef<ReturnType<typeof createBrowseNavigationCoordinator> | null>(
     null,
@@ -868,16 +839,6 @@ function OpenCommandPaletteDialog(props: {
       new Map<ProjectId, string>(projects.map((project) => [project.id, project.workspaceRoot])),
     [projects],
   );
-  const projectFaviconPathById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.faviconPath ?? null] as const)),
-    [projects],
-  );
-  const projectTitleById = useMemo(
-    () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.title])),
-    [projects],
-  );
-
-  const activeThreadId = activeThread?.id;
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
@@ -960,48 +921,10 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const openProjectFromSearch = useMemo(
-    () => async (project: (typeof projects)[number]) => {
-      const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-      const groupedProjectKeys = group
-        ? new Set(
-            group.memberProjectRefs.map(
-              (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
-            ),
-          )
-        : null;
-      const latestThread = groupedProjectKeys
-        ? (sortThreads(
-            threads.filter(
-              (thread) =>
-                thread.archivedAt === null &&
-                groupedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
-            ),
-            clientSettings.sidebarThreadSortOrder,
-          )[0] ?? null)
-        : getLatestThreadForProject(
-            threads.filter((thread) => thread.environmentId === project.environmentId),
-            project.id,
-            clientSettings.sidebarThreadSortOrder,
-          );
-      if (latestThread) {
-        await navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(
-            scopeThreadRef(latestThread.environmentId, latestThread.id),
-          ),
-        });
-        return;
-      }
-
-      await handleNewThread(scopeProjectRef(project.environmentId, project.id));
+    () => async (_project: (typeof projects)[number]) => {
+      await navigate({ to: "/" });
     },
-    [
-      clientSettings.sidebarThreadSortOrder,
-      handleNewThread,
-      navigate,
-      projectGroupByTargetKey,
-      threads,
-    ],
+    [navigate],
   );
 
   const projectSearchItems = useMemo(
@@ -1055,100 +978,15 @@ function OpenCommandPaletteDialog(props: {
             );
           },
           icon: projectFavicon,
-          runProject: async (project) => {
-            const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-            const contextualRefBelongsToGroup =
-              contextualProjectRef !== null &&
-              group?.memberProjectRefs.some(
-                (projectRef) =>
-                  projectRef.environmentId === contextualProjectRef.environmentId &&
-                  projectRef.projectId === contextualProjectRef.projectId,
-              );
-            await handleNewThread(
-              contextualRefBelongsToGroup
-                ? contextualProjectRef
-                : scopeProjectRef(project.environmentId, project.id),
-            );
+          runProject: async () => {
+            await navigate({ to: "/" });
           },
         }),
       ),
-    [
-      contextualProjectRef,
-      handleNewThread,
-      pickerProjects,
-      projectEnvironmentLocationById,
-      projectGroupByTargetKey,
-    ],
+    [navigate, pickerProjects, projectEnvironmentLocationById, projectGroupByTargetKey],
   );
 
-  const allThreadItems = useMemo(
-    () =>
-      buildThreadActionItems({
-        threads,
-        ...(activeThreadId ? { activeThreadId } : {}),
-        projectTitleById,
-        sortOrder: clientSettings.sidebarThreadSortOrder,
-        icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-        renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
-        renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
-        renderDescription: (thread, { projectTitle }) => {
-          const modelInstanceId =
-            thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
-          const providerEntry =
-            providerEntryByEnvironmentAndInstanceId.get(
-              `${thread.environmentId}:${modelInstanceId}`,
-            ) ?? null;
-          return (
-            <ThreadCommandSubtitle
-              environmentId={thread.environmentId}
-              projectCwd={projectCwdById.get(thread.projectId) ?? null}
-              projectFaviconPath={projectFaviconPathById.get(thread.projectId) ?? null}
-              projectTitle={projectTitle ?? null}
-              branch={thread.branch}
-              worktreePath={thread.worktreePath}
-              isCurrent={thread.id === activeThreadId}
-              driverKind={providerEntry?.driverKind ?? null}
-              providerDisplayName={
-                thread.session?.providerName ?? providerEntry?.displayName ?? modelInstanceId
-              }
-            />
-          );
-        },
-        getContentMatch: (thread) => {
-          const match = threadContentMatchByKey.get(
-            threadSearchMatchKey({
-              environmentId: thread.environmentId,
-              threadId: thread.id,
-            }),
-          );
-          return match && (match.source === "user" || match.source === "assistant")
-            ? {
-                source: match.source,
-                snippet: match.snippet,
-                query: threadSearchQuery,
-              }
-            : undefined;
-        },
-        runThread: async (thread) => {
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
-          });
-        },
-      }),
-    [
-      activeThreadId,
-      clientSettings.sidebarThreadSortOrder,
-      navigate,
-      projectCwdById,
-      projectFaviconPathById,
-      projectTitleById,
-      providerEntryByEnvironmentAndInstanceId,
-      threadContentMatchByKey,
-      threadSearchQuery,
-      threads,
-    ],
-  );
+  const allThreadItems: ReturnType<typeof buildThreadActionItems> = [];
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
   const pushPaletteView = useCallback(
@@ -1243,8 +1081,8 @@ function OpenCommandPaletteDialog(props: {
 
   const openSourceControlSettings = useCallback(() => {
     setOpen(false);
-    void navigate({ to: "/settings/source-control" });
-  }, [navigate, setOpen]);
+    openSettings("source-control");
+  }, [setOpen]);
 
   const buildAddProjectSourceGroups = useCallback(
     (
@@ -1486,44 +1324,16 @@ function OpenCommandPaletteDialog(props: {
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
-  if (projects.length > 0) {
-    const activeProjectTitle =
-      projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
-      (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
-
-    if (activeProjectTitle) {
-      actionItems.push({
-        kind: "action",
-        value: "action:new-thread",
-        searchTerms: ["new thread", "chat", "create", "draft"],
-        title: (
-          <>
-            New thread in <span className="font-semibold">{activeProjectTitle}</span>
-          </>
-        ),
-        icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-        shortcutCommand: "chat.new",
-        run: async () => {
-          await startNewThreadFromContext({
-            activeDraftThread,
-            activeThread: activeThread ?? undefined,
-            defaultProjectRef,
-            handleNewThread,
-          });
-        },
-      });
-    }
-
-    actionItems.push({
-      kind: "submenu",
-      value: "action:new-thread-in",
-      searchTerms: ["new thread", "project", "pick", "choose", "select"],
-      title: "New thread in...",
-      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
-      addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
-    });
-  }
+  actionItems.push(
+    buildModelPickerCommandPaletteAction({
+      composerHandle: composerHandleRef?.current ?? null,
+      closePalette: () => setOpen(false),
+      scheduleAfterClose: (openModelPicker) => {
+        window.requestAnimationFrame(openModelPicker);
+      },
+      icon: <BotIcon className={ITEM_ICON_CLASS} />,
+    }),
+  );
 
   actionItems.push({
     kind: "action",
@@ -1614,12 +1424,34 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
+    value: "action:plugins",
+    searchTerms: ["plugins", "mcp", "tools", "executor", "composio"],
+    title: "Open plugins",
+    icon: <PuzzleIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      openPlugins();
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:usage",
+    searchTerms: ["usage", "limits", "quota", "plan", "subscription"],
+    title: "Open usage",
+    icon: <ChartNoAxesColumnIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      openUsage();
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
     value: "action:settings",
     searchTerms: ["settings", "preferences", "configuration", "keybindings"],
     title: "Open settings",
     icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      await navigate({ to: "/settings" });
+      openSettings();
     },
   });
 
@@ -1723,34 +1555,7 @@ function OpenCommandPaletteDialog(props: {
         cwd,
       );
       if (existing) {
-        const latestThread = getLatestThreadForProject(
-          threads.filter((thread) => thread.environmentId === existing.environmentId),
-          existing.id,
-          clientSettings.sidebarThreadSortOrder,
-        );
-        if (latestThread) {
-          await navigate({
-            to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(
-              scopeThreadRef(latestThread.environmentId, latestThread.id),
-            ),
-          });
-        } else {
-          const navigationResult = await settlePromise(() =>
-            handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),
-          );
-          if (navigationResult._tag === "Failure") {
-            const error = squashAtomCommandFailure(navigationResult);
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Failed to open project",
-                description: error instanceof Error ? error.message : "An error occurred.",
-              }),
-            );
-            return;
-          }
-        }
+        await navigate({ to: "/" });
         setOpen(false);
         return;
       }
@@ -1787,24 +1592,10 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      const navigationResult = await settlePromise(() =>
-        handleNewThread(scopeProjectRef(input.environmentId, projectId)),
-      );
-      if (navigationResult._tag === "Failure") {
-        const error = squashAtomCommandFailure(navigationResult);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Failed to add project",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-        return;
-      }
+      await navigate({ to: "/" });
       setOpen(false);
     },
     [
-      handleNewThread,
       createProject,
       environments,
       navigate,

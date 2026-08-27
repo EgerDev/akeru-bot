@@ -1,7 +1,9 @@
+import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import indexHtml from "../index.html?raw";
 import {
+  AKERU_PAPER_THEME,
   CUSTOM_THEMES_STORAGE_KEY,
   getDefaultThemeColors,
   getThemeColorsForMode,
@@ -9,10 +11,7 @@ import {
   isKnownThemePreference,
   resolveThemeAppearance,
   T3_CHAT_THEME,
-  EMBER_THEME,
   GROVE_THEME,
-  IRIS_THEME,
-  OCEAN_THEME,
   THEME_APPEARANCE_MODE_STORAGE_KEY,
   THEME_FOLLOW_SYSTEM_STORAGE_KEY,
   toCanonicalThemeColor,
@@ -156,6 +155,14 @@ describe("index.html boot script", () => {
   }> = [
     { name: "no stored preference on a dark OS", storage: {}, prefersDark: true },
     {
+      name: "Akeru Paper follows a dark OS",
+      storage: {
+        [THEME_STORAGE_KEY]: "akeru-paper",
+        [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true",
+      },
+      prefersDark: true,
+    },
+    {
       name: "T3 Chat follows a dark OS",
       storage: { [THEME_STORAGE_KEY]: "t3-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
       prefersDark: true,
@@ -257,6 +264,26 @@ describe("index.html boot script", () => {
     expect(boot.isDark).toBe(runtimeResolvedAppearance(storage, prefersDark) === "dark");
   });
 
+  it("boots a fresh profile into Akeru Paper", () => {
+    const boot = runBootScript({ storage: {}, prefersDark: true });
+
+    expect(boot.themeId).toBe("akeru-paper");
+    expect(boot.themeSelected).toBe("true");
+    expect(boot.isDark).toBe(true);
+    expect(boot.backgroundColor).toBe(AKERU_PAPER_THEME.variants!.dark!.chrome);
+  });
+
+  it("migrates the old system default to Akeru Paper", () => {
+    const boot = runBootScript({
+      storage: { [THEME_STORAGE_KEY]: "system" },
+      prefersDark: true,
+    });
+
+    expect(boot.themeId).toBe("akeru-paper");
+    expect(boot.isDark).toBe(true);
+    expect(boot.backgroundColor).toBe(AKERU_PAPER_THEME.variants!.dark!.chrome);
+  });
+
   it("marks built-in and custom themes on the document element", () => {
     const chat = runBootScript({
       storage: { [THEME_STORAGE_KEY]: "t3-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
@@ -342,7 +369,7 @@ describe("index.html boot script", () => {
   // boot script's hand-maintained copy into a CI-enforced contract: any
   // palette change breaks this test until the copy in index.html is updated.
   it("keeps every built-in boot splash in sync with the real palettes", () => {
-    for (const theme of [T3_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
+    for (const theme of BUILT_IN_THEMES) {
       // The boot script resolves every built-in from a light base appearance.
       expect(theme.appearance).toBe("light");
       for (const mode of ["light", "dark"] as const) {
@@ -514,5 +541,6 @@ describe("index.html boot script", () => {
 
     const dark = runBootScript({ storageThrows: true, prefersDark: true });
     expect(dark.isDark).toBe(true);
+    expect(dark.backgroundColor).toBe("#050505");
   });
 });

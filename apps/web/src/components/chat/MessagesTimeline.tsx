@@ -109,6 +109,8 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
+import { BotAvatarView } from "../roster/BotAvatarView";
+import { useSelectedBot } from "../roster/rosterStore";
 
 import {
   buildInlineTerminalContextText,
@@ -1136,42 +1138,48 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
+  const bot = useSelectedBot();
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
-        <ChatMarkdown
-          text={messageText}
-          cwd={ctx.markdownCwd}
-          threadRef={ctx.threadRef ?? undefined}
-          isStreaming={Boolean(row.message.streaming)}
-          lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-          skills={ctx.skills}
-        />
-        <AssistantChangedFilesSection
-          turnSummary={row.assistantTurnDiffSummary}
-          routeThreadKey={ctx.routeThreadKey}
-          resolvedTheme={ctx.resolvedTheme}
-          onOpenTurnDiff={ctx.onOpenTurnDiff}
-        />
-        {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
-            <AssistantCopyButton row={row} />
-            {!row.message.streaming && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={<p className="text-muted-foreground text-xs tabular-nums" />}
-                >
-                  {formatDayAwareTimestamp(row.message.updatedAt, ctx.timestampFormat)}
-                </TooltipTrigger>
-                <TooltipPopup>
-                  {formatChatTimestampTooltip(row.message.updatedAt, ctx.timestampFormat)}
-                </TooltipPopup>
-              </Tooltip>
-            )}
-          </div>
+      <div className="relative flex min-w-0 items-start gap-2 px-1 py-0.5">
+        {bot !== null ? (
+          <BotAvatarView avatar={bot.avatar} name={bot.name} className="mt-1 size-5" />
         ) : null}
+        <div className="min-w-0 flex-1">
+          <ChatMarkdown
+            text={messageText}
+            cwd={ctx.markdownCwd}
+            threadRef={ctx.threadRef ?? undefined}
+            isStreaming={Boolean(row.message.streaming)}
+            lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+            skills={ctx.skills}
+          />
+          <AssistantChangedFilesSection
+            turnSummary={row.assistantTurnDiffSummary}
+            routeThreadKey={ctx.routeThreadKey}
+            resolvedTheme={ctx.resolvedTheme}
+            onOpenTurnDiff={ctx.onOpenTurnDiff}
+          />
+          {row.showAssistantMeta ? (
+            <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+              <AssistantCopyButton row={row} />
+              {!row.message.streaming && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<p className="text-muted-foreground text-xs tabular-nums" />}
+                  >
+                    {formatDayAwareTimestamp(row.message.updatedAt, ctx.timestampFormat)}
+                  </TooltipTrigger>
+                  <TooltipPopup>
+                    {formatChatTimestampTooltip(row.message.updatedAt, ctx.timestampFormat)}
+                  </TooltipPopup>
+                </Tooltip>
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
     </>
   );

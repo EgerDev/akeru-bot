@@ -70,6 +70,26 @@ describe("theme failure handling", () => {
     }
   });
 
+  it("uses Akeru Paper for a fresh profile", async () => {
+    vi.stubGlobal("window", { localStorage: createStorage() });
+
+    const { readThemePreference } = await import("./useTheme");
+
+    expect(readThemePreference()).toBe("akeru-paper");
+  });
+
+  it("migrates the old system default to Akeru Paper", async () => {
+    vi.stubGlobal("window", {
+      localStorage: createStorage({
+        getItem: (key) => (key === "t3code:theme" ? "system" : null),
+      }),
+    });
+
+    const { readThemePreference } = await import("./useTheme");
+
+    expect(readThemePreference()).toBe("akeru-paper");
+  });
+
   it("reads the persisted T3 Chat theme preference", async () => {
     vi.stubGlobal("window", {
       localStorage: createStorage({

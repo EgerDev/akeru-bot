@@ -281,7 +281,7 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-[320ms] ease-[cubic-bezier(0.22,1.18,0.36,1)] motion-reduce:transition-none",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -292,7 +292,7 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-[320ms] ease-[cubic-bezier(0.22,1.18,0.36,1)] motion-reduce:transition-none md:flex",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -339,7 +339,22 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       variant="ghost"
       {...props}
     >
-      {isOpen ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
+      <span className="relative size-[19px]" aria-hidden>
+        <PanelLeftCloseIcon
+          className={cn(
+            "absolute inset-0 size-[19px] transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
+            isOpen ? "scale-100 opacity-100" : "-rotate-12 scale-75 opacity-0",
+          )}
+          strokeWidth={1.55}
+        />
+        <PanelLeftIcon
+          className={cn(
+            "absolute inset-0 size-[19px] transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
+            isOpen ? "rotate-12 scale-75 opacity-0" : "scale-100 opacity-100",
+          )}
+          strokeWidth={1.55}
+        />
+      </span>
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );

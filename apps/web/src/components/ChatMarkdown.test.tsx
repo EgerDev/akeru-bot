@@ -188,6 +188,30 @@ describe("orderedListGutterStyle", () => {
   });
 });
 
+describe("ChatMarkdown rich formatting", () => {
+  it("renders inline and display math", () => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd={undefined}
+        text={"Inline $E = mc^2$ and display:\n\n$$\n\\sum_{n=1}^N n\n$$"}
+      />,
+    );
+
+    expect(html).toContain("<math");
+    expect(html).toContain('display="block"');
+  });
+
+  it("reserves Mermaid fences for client-side diagrams", () => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown cwd={undefined} text={"```mermaid\ngraph LR\n  A --> B\n```"} />,
+    );
+
+    expect(html).toContain('data-mermaid-diagram=""');
+    expect(html).toContain("Rendering diagram");
+    expect(html).not.toContain("chat-markdown-codeblock");
+  });
+});
+
 describe("ChatMarkdown Windows file links", () => {
   const environmentId = EnvironmentId.make("env-windows");
 

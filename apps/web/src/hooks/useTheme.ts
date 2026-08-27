@@ -35,8 +35,9 @@ type DesktopThemeBridge = Pick<DesktopBridge, "setTheme">;
 
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+const DEFAULT_THEME = "akeru-paper";
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
-  theme: "system",
+  theme: DEFAULT_THEME,
   systemDark: false,
   followSystem: true,
   appearanceMode: "system",
@@ -125,7 +126,7 @@ function readStoredFollowSystem(theme: Theme): boolean {
     // Fall back to the legacy theme value when the separate preference is unavailable.
   }
 
-  return theme === "system";
+  return theme === "system" || theme === DEFAULT_THEME;
 }
 
 function isThemePreferenceMode(value: string | null): value is ThemePreferenceMode {
@@ -174,7 +175,7 @@ export function readThemePreference(): Theme {
     });
   }
   if (raw !== null && isKnownThemePreference(raw)) {
-    return canonicalThemePreference(raw);
+    return raw === "system" ? DEFAULT_THEME : canonicalThemePreference(raw);
   }
   return DEFAULT_THEME_SNAPSHOT.theme;
 }

@@ -118,6 +118,29 @@ export interface CommandPaletteGroup {
   readonly items: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
 }
 
+export function buildModelPickerCommandPaletteAction(input: {
+  readonly composerHandle: { readonly openModelPicker: () => void } | null;
+  readonly closePalette: () => void;
+  readonly scheduleAfterClose: (openModelPicker: () => void) => void;
+  readonly icon: ReactNode;
+}): CommandPaletteActionItem {
+  return {
+    kind: "action",
+    value: "action:change-model",
+    searchTerms: ["change model", "model", "provider", "reasoning"],
+    title: "Change model",
+    icon: input.icon,
+    disabled: input.composerHandle === null,
+    keepOpen: true,
+    shortcutCommand: "modelPicker.toggle",
+    run: async () => {
+      if (input.composerHandle === null) return;
+      input.closePalette();
+      input.scheduleAfterClose(input.composerHandle.openModelPicker);
+    },
+  };
+}
+
 export interface CommandPaletteView {
   readonly addonIcon: ReactNode;
   readonly groups: ReadonlyArray<CommandPaletteGroup>;

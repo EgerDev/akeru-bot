@@ -28,6 +28,42 @@ export function applyShellStreamEvent(
         projects: Arr.filter(snapshot.projects, (p) => p.id !== event.projectId),
         snapshotSequence: event.sequence,
       };
+    case "bot-upserted": {
+      const bots = snapshot.bots.some((bot) => bot.id === event.bot.id)
+        ? Arr.map(snapshot.bots, (bot) => (bot.id === event.bot.id ? event.bot : bot))
+        : Arr.append(snapshot.bots, event.bot);
+      return { ...snapshot, bots, snapshotSequence: event.sequence };
+    }
+    case "group-upserted": {
+      const groups = snapshot.groups.some((group) => group.id === event.group.id)
+        ? Arr.map(snapshot.groups, (group) => (group.id === event.group.id ? event.group : group))
+        : Arr.append(snapshot.groups, event.group);
+      return { ...snapshot, groups, snapshotSequence: event.sequence };
+    }
+    case "group-removed":
+      return {
+        ...snapshot,
+        groups: Arr.filter(snapshot.groups, (group) => group.id !== event.groupId),
+        snapshotSequence: event.sequence,
+      };
+    case "mcp-server-upserted": {
+      const mcpServers = snapshot.mcpServers ?? [];
+      const nextMcpServers = mcpServers.some((server) => server.id === event.mcpServer.id)
+        ? Arr.map(mcpServers, (server) =>
+            server.id === event.mcpServer.id ? event.mcpServer : server,
+          )
+        : Arr.append(mcpServers, event.mcpServer);
+      return { ...snapshot, mcpServers: nextMcpServers, snapshotSequence: event.sequence };
+    }
+    case "mcp-server-removed":
+      return {
+        ...snapshot,
+        mcpServers: Arr.filter(
+          snapshot.mcpServers ?? [],
+          (server) => server.id !== event.mcpServerId,
+        ),
+        snapshotSequence: event.sequence,
+      };
     case "thread-upserted": {
       const threads = snapshot.threads.some((t) => t.id === event.thread.id)
         ? Arr.map(snapshot.threads, (t) => (t.id === event.thread.id ? event.thread : t))

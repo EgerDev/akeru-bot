@@ -51,6 +51,10 @@
       "types": "./src/state/auth.ts",
       "default": "./src/state/auth.ts"
     },
+    "./state/bots": {
+      "types": "./src/state/bots.ts",
+      "default": "./src/state/bots.ts"
+    },
     "./state/assets": {
       "types": "./src/state/assets.ts",
       "default": "./src/state/assets.ts"
@@ -74,6 +78,10 @@
     "./state/models": {
       "types": "./src/state/models.ts",
       "default": "./src/state/models.ts"
+    },
+    "./state/mcp-servers": {
+      "types": "./src/state/mcpServerCommands.ts",
+      "default": "./src/state/mcpServerCommands.ts"
     },
     "./state/orchestration": {
       "types": "./src/state/orchestration.ts",

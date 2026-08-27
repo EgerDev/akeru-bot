@@ -31,6 +31,8 @@
     "vercel.ts",
     "test",
     "scripts/warm-dep-cache.ts",
+    "../../plugins",
     "../../scripts/lib/public-config.ts"
-  ]
+  ],
+  "exclude": ["../../plugins/*.test.ts"]
 }

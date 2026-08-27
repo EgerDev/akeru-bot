@@ -124,6 +124,7 @@ import { cn } from "~/lib/utils";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
+  buildSidebarProjectSections,
   buildBulkTitleRegenerationContextMenuItem,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
@@ -719,6 +720,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // the user visits the thread.
   wokeAt: string | null;
   isActive: boolean;
+  // False for cards rendered under their project's section header, where a
+  // per-row project label would repeat the header. Pinned and ungrouped
+  // rows keep their own project context.
+  showProjectContext: boolean;
   openPullRequestsInRightPanel: boolean;
   jumpLabel: string | null;
   currentEnvironmentId: string | null;
@@ -1414,21 +1419,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         >
           <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                faviconPath={props.projectFaviconPath}
-                className="size-4 shrink-0"
-              />
-              {props.projectTitle ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
+              {props.showProjectContext ? (
+                <>
+                  <ProjectFavicon
+                    environmentId={thread.environmentId}
+                    cwd={props.projectCwd ?? ""}
+                    faviconPath={props.projectFaviconPath}
+                    className="size-4 shrink-0"
+                  />
+                  {props.projectTitle ? (
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-secondary-label text-xs",
+                        shouldRecede ? "font-normal" : "font-medium",
+                      )}
+                    >
+                      {props.projectTitle}
+                    </span>
+                  ) : (
+                    <span className="flex-1" />
                   )}
-                >
-                  {props.projectTitle}
-                </span>
+                </>
               ) : (
                 <span className="flex-1" />
               )}
@@ -2117,13 +2128,32 @@ export default function Sidebar() {
     threads,
   ]);
 
+  // Per-project sections for the active list. A pure regrouping of the
+  // already-sorted active threads: section order follows the project group
+  // order, thread order inside a section is untouched, and threads whose
+  // project resolves to no loaded group render after the sections without a
+  // header (the shell has nothing truthful to label them with).
+  const { sections: activeProjectSections, ungroupedThreads: ungroupedActiveThreads } = useMemo(
+    () => buildSidebarProjectSections({ groups: projectGroups, threads: activeThreads }),
+    [activeThreads, projectGroups],
+  );
+  // Keyboard traversal, jump hints, and shift-range selection follow VISUAL
+  // order, which is now the sectioned order, not the raw sorted order.
+  const sectionedActiveThreads = useMemo(
+    () => [
+      ...activeProjectSections.flatMap((section) => section.threads),
+      ...ungroupedActiveThreads,
+    ],
+    [activeProjectSections, ungroupedActiveThreads],
+  );
+
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const searchableThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
+    () => [...pinnedThreads, ...sectionedActiveThreads, ...snoozedThreads, ...settledThreads],
+    [sectionedActiveThreads, pinnedThreads, settledThreads, snoozedThreads],
   );
   const threadSearchResults = useMemo(
     () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
@@ -2241,8 +2271,13 @@ export default function Sidebar() {
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...pinnedThreads,
+      ...sectionedActiveThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [pinnedThreads, sectionedActiveThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -3662,6 +3697,7 @@ export default function Sidebar() {
                     thread: EnvironmentThreadShell,
                     section: "pinned" | "active" | "snoozed" | "settled",
                     sortable?: SortablePinnedRowBag,
+                    options?: { showProjectContext?: boolean },
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
@@ -3721,6 +3757,7 @@ export default function Sidebar() {
                         // rows resolve to null on their own.
                         wokeAt={threadWokeAt(thread, { now: snoozeNow })}
                         isActive={routeThreadKey === threadKey}
+                        showProjectContext={options?.showProjectContext ?? true}
                         openPullRequestsInRightPanel={routeThreadRef !== null}
                         jumpLabel={
                           showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
@@ -3832,7 +3869,40 @@ export default function Sidebar() {
                       />,
                     );
                   }
-                  for (const thread of activeThreads) {
+                  // Active threads render under one header per project group
+                  // (same source as the scope menu), then any threads whose
+                  // project no longer resolves, headerless. Headers are
+                  // labels, not controls — scoping and project settings keep
+                  // their existing entry points.
+                  for (const section of activeProjectSections) {
+                    items.push(
+                      <li
+                        key={`project-section-${section.group.projectKey}`}
+                        data-thread-selection-safe
+                        data-testid="sidebar-project-section"
+                        className="list-none"
+                      >
+                        <div className="mb-0.5 mt-2 flex items-center gap-2 px-2.5">
+                          <ProjectFavicon
+                            environmentId={section.group.environmentId}
+                            cwd={section.group.workspaceRoot}
+                            faviconPath={section.group.faviconPath}
+                            className="size-3.5 shrink-0"
+                          />
+                          <span className="min-w-0 truncate text-xs font-medium text-muted-foreground/70">
+                            {section.group.displayName}
+                          </span>
+                          <span className="h-px flex-1 bg-sidebar-border/60" />
+                        </div>
+                      </li>,
+                    );
+                    for (const thread of section.threads) {
+                      items.push(
+                        renderThreadRow(thread, "active", undefined, { showProjectContext: false }),
+                      );
+                    }
+                  }
+                  for (const thread of ungroupedActiveThreads) {
                     items.push(renderThreadRow(thread, "active"));
                   }
                   // Snoozed shelf: between the inbox and Settled — out of the

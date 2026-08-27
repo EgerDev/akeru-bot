@@ -17,20 +17,35 @@ import {
 
 type CommandType = ClientOrchestrationCommand["type"];
 type CommandOf<T extends CommandType> = Extract<ClientOrchestrationCommand, { readonly type: T }>;
-type CommandInput<T extends CommandType> = Omit<
-  CommandOf<T>,
-  "type" | "commandId" | "createdAt"
-> & {
-  readonly commandId?: CommandId;
-} & ("createdAt" extends keyof CommandOf<T>
-    ? {
-        readonly createdAt?: CommandOf<T>["createdAt"];
-      }
-    : {});
+type CommandInputFor<C extends ClientOrchestrationCommand> = C extends ClientOrchestrationCommand
+  ? Omit<C, "type" | "commandId" | "createdAt"> & {
+      readonly commandId?: CommandId;
+    } & ("createdAt" extends keyof C
+        ? {
+            readonly createdAt?: C["createdAt"];
+          }
+        : {})
+  : never;
+type CommandInput<T extends CommandType> = CommandInputFor<CommandOf<T>>;
 
 export type CreateProjectInput = CommandInput<"project.create">;
 export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
+export type CreateBotInput = CommandInput<"bot.create">;
+export type UpdateBotInput = CommandInput<"bot.update">;
+export type ArchiveBotInput = CommandInput<"bot.archive">;
+export type RestoreBotInput = CommandInput<"bot.restore">;
+export type CreateGroupInput = CommandInput<"group.create">;
+export type RenameGroupInput = CommandInput<"group.rename">;
+export type DeleteGroupInput = CommandInput<"group.delete">;
+export type AssignGroupMemberInput = CommandInput<"group.member.assign">;
+export type UnassignGroupMemberInput = CommandInput<"group.member.unassign">;
+export type SetGroupBossInput = CommandInput<"group.boss.set">;
+export type CreateMcpServerInput = CommandInput<"mcp-server.create">;
+export type UpdateMcpServerInput = CommandInput<"mcp-server.update">;
+export type DeleteMcpServerInput = CommandInput<"mcp-server.delete">;
+export type EnableMcpServerInput = CommandInput<"mcp-server.enable">;
+export type DisableMcpServerInput = CommandInput<"mcp-server.disable">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
@@ -114,6 +129,178 @@ export const deleteProject: (input: DeleteProjectInput) => CommandEffect = Effec
   return yield* dispatch({
     ...input,
     type: "project.delete",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const createBot: (input: CreateBotInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createBot",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "bot.create",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const createMcpServer: (input: CreateMcpServerInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createMcpServer",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  if (input.transport === "stdio") {
+    return yield* dispatch({
+      ...input,
+      type: "mcp-server.create",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  }
+  return yield* dispatch({
+    ...input,
+    type: "mcp-server.create",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const updateBot: (input: UpdateBotInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.updateBot",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "bot.update",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const updateMcpServer: (input: UpdateMcpServerInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.updateMcpServer",
+)(function* (input) {
+  const nextCommandId = yield* commandId(input);
+  if (input.transport === "stdio") {
+    return yield* dispatch({
+      ...input,
+      type: "mcp-server.update",
+      commandId: nextCommandId,
+    });
+  }
+  return yield* dispatch({
+    ...input,
+    type: "mcp-server.update",
+    commandId: nextCommandId,
+  });
+});
+
+export const deleteMcpServer: (input: DeleteMcpServerInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.deleteMcpServer",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "mcp-server.delete",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const archiveBot: (input: ArchiveBotInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.archiveBot",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "bot.archive",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const enableMcpServer: (input: EnableMcpServerInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.enableMcpServer",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "mcp-server.enable",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const restoreBot: (input: RestoreBotInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.restoreBot",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "bot.restore",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const createGroup: (input: CreateGroupInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.createGroup",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "group.create",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const renameGroup: (input: RenameGroupInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.renameGroup",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "group.rename",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const deleteGroup: (input: DeleteGroupInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.deleteGroup",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "group.delete",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const assignGroupMember: (input: AssignGroupMemberInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.assignGroupMember",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "group.member.assign",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const unassignGroupMember: (input: UnassignGroupMemberInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.unassignGroupMember",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "group.member.unassign",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const setGroupBoss: (input: SetGroupBossInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setGroupBoss",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "group.boss.set",
+    commandId: yield* commandId(input),
+  });
+});
+
+export const disableMcpServer: (input: DisableMcpServerInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.disableMcpServer",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "mcp-server.disable",
     commandId: yield* commandId(input),
   });
 });

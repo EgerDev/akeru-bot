@@ -42,6 +42,8 @@ const PREPARED: PreparedConnection = {
 
 const LIVE_SHELL_SNAPSHOT: OrchestrationShellSnapshot = {
   snapshotSequence: 1,
+  bots: [],
+  groups: [],
   projects: [],
   threads: [],
   updatedAt: "2026-06-06T00:00:00.000Z",
@@ -154,6 +156,8 @@ describe("environment shell synchronization", () => {
     Effect.gen(function* () {
       const cachedSnapshot: OrchestrationShellSnapshot = {
         snapshotSequence: 5,
+        bots: [],
+        groups: [],
         projects: [],
         threads: [{ id: "cached-thread" } as never],
         updatedAt: "2026-06-06T00:00:00.000Z",

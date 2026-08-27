@@ -15,7 +15,6 @@ import type {
   SourceControlRepositoryVisibility,
   VcsStatusResult,
 } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -92,6 +91,7 @@ import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
+import { openSettings } from "~/settingsDialogStore";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -380,7 +380,6 @@ interface PublishRepositoryDialogProps {
 }
 
 function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
-  const navigate = useNavigate();
   const sourceControlDiscovery = useEnvironmentQuery(
     props.environmentId === null
       ? null
@@ -547,8 +546,8 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
 
   const openSourceControlSettings = useCallback(() => {
     handleOpenChange(false);
-    void navigate({ to: "/settings/source-control" });
-  }, [handleOpenChange, navigate]);
+    openSettings("source-control");
+  }, [handleOpenChange]);
 
   return (
     <Dialog open={props.open} onOpenChange={handleOpenChange}>

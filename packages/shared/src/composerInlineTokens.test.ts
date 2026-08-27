@@ -68,6 +68,32 @@ describe("collectComposerInlineTokens", () => {
     ]);
   });
 
+  it("preserves a bot mention as a separate token type", () => {
+    const text = "@Pathfinder";
+
+    expect(
+      collectComposerInlineTokens(text, {
+        preserveTrailingFrom: [
+          {
+            type: "bot-mention",
+            value: "bot-pathfinder",
+            source: text,
+            start: 0,
+            end: text.length,
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        type: "bot-mention",
+        value: "bot-pathfinder",
+        source: text,
+        start: 0,
+        end: text.length,
+      },
+    ]);
+  });
+
   it("does not preserve a pill after its source is edited", () => {
     const confirmed = collectComposerInlineTokens("[package.json](package.json) ");
 

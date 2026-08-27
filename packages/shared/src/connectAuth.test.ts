@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildConnectAuthorizeRequestUrl,
   buildConnectClerkAuthorizeUrl,
+  checkConnectAuthCode,
   connectCallbackUrl,
   connectLoopbackRedirectUri,
   encodeConnectAuthCode,
@@ -100,5 +101,17 @@ describe("connectAuth", () => {
     expect(parseConnectAuthCode("no-separator")).toBeNull();
     expect(parseConnectAuthCode(".leading")).toBeNull();
     expect(parseConnectAuthCode("trailing.")).toBeNull();
+  });
+
+  it("explains a malformed pasted code without naming a product", () => {
+    const message = checkConnectAuthCode("no-separator", "state-1");
+
+    expect(message).toBe("That does not look like a connect code. Copy the full code.");
+    expect(
+      checkConnectAuthCode(encodeConnectAuthCode({ code: "c1", state: "state-1" }), "state-1"),
+    ).toEqual({
+      code: "c1",
+      state: "state-1",
+    });
   });
 });

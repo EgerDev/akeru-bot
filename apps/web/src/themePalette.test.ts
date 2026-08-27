@@ -1,7 +1,12 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as effectIt } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
+import { BUILT_IN_THEME_IDS, BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 
 import {
+  AKERU_PAPER_THEME,
   applyThemeColorPreview,
   applyThemePalette,
   getThemeColorsForMode,
@@ -38,6 +43,7 @@ import {
   getDefaultThemeColors,
   themeColorToHex,
   toCanonicalThemeColor,
+  THEME_COLOR_ROLES,
   THEME_FILE_VERSION,
 } from "./themePalette";
 
@@ -433,12 +439,57 @@ describe("theme files", () => {
     }
   });
 
+  it("keeps the Akeru Paper palette tied to the landing design", () => {
+    expect(BUILT_IN_THEME_IDS).toContain(AKERU_PAPER_THEME.id);
+    expect(BUILT_IN_THEMES.map((theme) => theme.id)).toEqual(BUILT_IN_THEME_IDS);
+    expect(Object.keys(AKERU_PAPER_THEME.colors).sort()).toEqual([...THEME_COLOR_ROLES].sort());
+    expect(Object.keys(AKERU_PAPER_THEME.variants!.dark!).sort()).toEqual(
+      [...THEME_COLOR_ROLES].sort(),
+    );
+    expectThemeColors(AKERU_PAPER_THEME.colors, {
+      canvas: "#f4f1ea",
+      text: "#2a2724",
+      accent: "#8b6fc9",
+      focus: "#8b6fc9",
+      update: "#8b6fc9",
+      messageAction: "#8b6fc9",
+      terminalCursor: "#8b6fc9",
+      messageSurface: "#f0eaf8",
+      codeBackground: "#ece8e0",
+      sidebar: "#ece8df",
+    });
+    expectThemeColors(AKERU_PAPER_THEME.variants!.dark!, {
+      canvas: "#050505",
+      text: "#f4f4f5",
+      accent: "#8b6fc9",
+      focus: "#8b6fc9",
+      update: "#8b6fc9",
+      messageAction: "#8b6fc9",
+      messageSurface: "#3f3f46",
+      codeBackground: "#111111",
+      sidebar: "#111111",
+    });
+  });
+
+  effectIt.effect("keeps Akeru Paper dark surfaces flat and opaque", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const css = yield* fileSystem.readFileString(
+        decodeURIComponent(new URL("./index.css", import.meta.url).pathname),
+      );
+      const scopedOverride = css.match(/html\[data-theme-id="akeru-paper"\] \{[\s\S]*?\n\}/)?.[0];
+
+      expect(scopedOverride).toContain("--surface-grain: none");
+      expect(scopedOverride).toContain("--glass-opacity: 100%");
+      expect(scopedOverride).toContain("--glass-blur: 0px");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it("includes the dual-mode maintainer themes", () => {
-    for (const theme of [T3_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
+    for (const theme of BUILT_IN_THEMES) {
       expect(getThemeDefinition(theme.id)).toBe(theme);
       expect(getThemeModes(theme)).toEqual(["light", "dark"]);
-      expect(theme.sidebarArtwork).toBe(true);
-      expect(themeAllowsSidebarArtwork(theme.id)).toBe(true);
+      expect(themeAllowsSidebarArtwork(theme.id)).toBe(theme.sidebarArtwork === true);
       expect(theme.colors.accent).toMatch(/^oklch\(/);
       expect(theme.variants?.dark?.accent).toMatch(/^oklch\(/);
 
@@ -447,7 +498,7 @@ describe("theme files", () => {
         expect(colors).not.toBeNull();
         expect(contrastRatio(colors!.text, colors!.canvas)).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(colors!.textMuted, colors!.canvas)).toBeGreaterThanOrEqual(4.5);
-        if (theme !== T3_CHAT_THEME) {
+        if (theme !== T3_CHAT_THEME && theme !== AKERU_PAPER_THEME) {
           expect(contrastRatio(colors!.textMuted, colors!.canvas)).toBeLessThan(5.5);
           expect(contrastRatio(colors!.textMuted, colors!.canvas)).toBeCloseTo(
             mode === "dark" ? 5.082 : 4.705,
@@ -474,6 +525,19 @@ describe("theme files", () => {
       }
     }
     expect(themeAllowsSidebarArtwork("my-custom-theme")).toBe(false);
+  });
+
+  it("reserves the Akeru Paper id for the built-in theme", () => {
+    expect(isKnownThemePreference(AKERU_PAPER_THEME.id)).toBe(true);
+    expect(() =>
+      parseThemeFile({
+        version: THEME_FILE_VERSION,
+        id: AKERU_PAPER_THEME.id,
+        name: "Akeru Paper copy",
+        appearance: "light",
+        colors: {},
+      }),
+    ).toThrow('The theme id "akeru-paper" is reserved.');
   });
 
   it("rejects a variant that repeats the base appearance", () => {

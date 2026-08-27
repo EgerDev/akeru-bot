@@ -17,10 +17,24 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useMemo } from "react";
 
+import { makeWindow } from "@t3tools/shared/usageFormat";
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@t3tools/shared/usageMerge";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
+
+export const USAGE_LOOKBACK_DAYS = 30;
+
+function usageWindowKey(input: UsageSummaryInput): string {
+  return JSON.stringify({
+    sinceDay: input.sinceDay,
+    untilDay: input.untilDay,
+    timeZone: input.timeZone,
+    resolution: input.resolution,
+    sinceTime: input.sinceTime,
+    untilTime: input.untilTime,
+  });
+}
 
 export interface EnvironmentUsageStatus {
   readonly environmentId: EnvironmentId;
@@ -71,17 +85,9 @@ export interface UsageView {
   readonly refresh: () => void;
 }
 
-export function useUsage(input: UsageSummaryInput): UsageView {
+export function useUsage(input: UsageSummaryInput = makeWindow(USAGE_LOOKBACK_DAYS)): UsageView {
   const windowKey = useMemo(
-    () =>
-      JSON.stringify({
-        sinceDay: input.sinceDay,
-        untilDay: input.untilDay,
-        timeZone: input.timeZone,
-        resolution: input.resolution,
-        sinceTime: input.sinceTime,
-        untilTime: input.untilTime,
-      }),
+    () => usageWindowKey(input),
     [
       input.sinceDay,
       input.untilDay,

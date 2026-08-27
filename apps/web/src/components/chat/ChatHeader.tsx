@@ -32,6 +32,8 @@ import ProjectScriptsControl, {
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
+import { type PresentationMode } from "./quietPresentation";
+import { ActiveBotHeaderChip } from "../roster/ActiveBotHeaderChip";
 import { useRemoteOpenState, type RemoteOpenMode } from "../../remoteOpen";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
@@ -65,6 +67,8 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
+  presentationMode: PresentationMode;
+  onTogglePresentationMode: () => void;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -134,6 +138,8 @@ export const ChatHeader = memo(function ChatHeader({
   availableEditors,
   rightPanelOpen,
   gitCwd,
+  presentationMode,
+  onTogglePresentationMode,
   onOpenPullRequest,
   onNewThreadInProject,
   onRunProjectScript,
@@ -288,6 +294,7 @@ export const ChatHeader = memo(function ChatHeader({
       className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
       onContextMenu={handleHeaderContextMenu}
     >
+      <ActiveBotHeaderChip />
       <WorkspaceBreadcrumb ariaLabel="Thread breadcrumb" className="flex-1">
         {/* The project always leads the header: knowing which project a
             thread lives in is priority zero, and the thread title alone
@@ -380,6 +387,24 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                onClick={onTogglePresentationMode}
+                className="cursor-pointer rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            }
+          >
+            {presentationMode === "quiet" ? "Show work" : "Hide work"}
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            {presentationMode === "quiet"
+              ? "Show tool activity in this thread"
+              : "Hide tool activity in this thread"}
+          </TooltipPopup>
+        </Tooltip>
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

@@ -1,6 +1,15 @@
 export type ComposerInlineToken =
   | {
+      /** A workspace path mention. Bot mentions use the separate bot-mention token. */
       readonly type: "mention";
+      readonly value: string;
+      readonly source: string;
+      readonly start: number;
+      readonly end: number;
+    }
+  | {
+      /** A group member bot mention. `value` is the stable bot id. */
+      readonly type: "bot-mention";
       readonly value: string;
       readonly source: string;
       readonly start: number;

@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import "culori/css";
 import { converter, parse } from "culori/fn";
 import {
+  AKERU_PAPER_THEME,
   BUILT_IN_THEMES,
   EMBER_THEME,
   GROVE_THEME,
@@ -16,9 +17,20 @@ import {
   type ThemeVariants,
 } from "@t3tools/shared/themePalettes";
 
-export { EMBER_THEME, GROVE_THEME, IRIS_THEME, OCEAN_THEME, T3_CHAT_THEME, THEME_COLOR_ROLES };
+export {
+  AKERU_PAPER_THEME,
+  BUILT_IN_THEMES,
+  EMBER_THEME,
+  GROVE_THEME,
+  IRIS_THEME,
+  OCEAN_THEME,
+  T3_CHAT_THEME,
+  THEME_COLOR_ROLES,
+};
 export type { ThemeAppearance, ThemeColorRole, ThemeColors, ThemeDefinition, ThemeVariants };
 
+export const AKERU_PAPER_THEME_ID = "akeru-paper" as const;
+export const AKERU_PAPER_THEME_LABEL = "Akeru Paper";
 export const T3_CHAT_THEME_ID = "t3-chat" as const;
 export const T3_CHAT_THEME_LABEL = "T3 Chat";
 export const GROVE_THEME_ID = "grove" as const;
@@ -60,6 +72,7 @@ const RESERVED_THEME_IDS = new Set([
   "system",
   "light",
   "dark",
+  AKERU_PAPER_THEME_ID,
   T3_CHAT_THEME_ID,
   GROVE_THEME_ID,
   OCEAN_THEME_ID,

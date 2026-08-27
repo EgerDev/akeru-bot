@@ -3567,7 +3567,7 @@ export default function LegacySidebar() {
         .downloadUpdate()
         .then((result) => {
           if (result.completed) {
-            showDesktopUpdateDownloadedToast(bridge, result.state);
+            showDesktopUpdateDownloadedToast();
           }
           if (!shouldToastDesktopUpdateActionResult(result)) return;
           const actionError = getDesktopUpdateActionError(result);

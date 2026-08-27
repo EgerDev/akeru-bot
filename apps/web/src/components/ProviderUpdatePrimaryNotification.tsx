@@ -1,4 +1,3 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { DownloadIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -22,6 +21,7 @@ import {
 } from "./ProviderUpdateLaunchNotification.logic";
 import { hiddenToastActionProps, stackedThreadToast, toastManager } from "./ui/toast";
 import { useAtomCommand } from "../state/use-atom-command";
+import { openSettings } from "~/settingsDialogStore";
 
 const seenProviderUpdateNotificationKeys = new Set<string>();
 type ProviderUpdateToastId = ReturnType<typeof toastManager.add>;
@@ -102,7 +102,6 @@ function addProviderUpdateToast(input: {
  * per-environment split is gated behind WSL presence.
  */
 export function ProviderUpdatePrimaryNotification() {
-  const navigate = useNavigate();
   const providers = useAtomValue(primaryServerProvidersAtom);
   const primaryEnvironment = usePrimaryEnvironment();
   const updateProvider = useAtomCommand(serverEnvironment.updateProvider, {
@@ -135,25 +134,21 @@ export function ProviderUpdatePrimaryNotification() {
     [providers, updateProviders],
   );
 
-  const openProviderSettings = useCallback(
-    (toastId?: ProviderUpdateToastId) => {
-      const activeToast = activeToastRef.current;
-      if (toastId !== undefined) {
-        toastManager.close(toastId);
-      } else if (activeToast?.kind === "prompt") {
-        toastManager.close(activeToast.toastId);
-      }
-      if (
-        activeToast &&
-        (toastId === undefined ||
-          (activeToast.kind === "prompt" && activeToast.toastId === toastId))
-      ) {
-        activeToastRef.current = null;
-      }
-      void navigate({ to: "/settings/providers" });
-    },
-    [navigate],
-  );
+  const openProviderSettings = useCallback((toastId?: ProviderUpdateToastId) => {
+    const activeToast = activeToastRef.current;
+    if (toastId !== undefined) {
+      toastManager.close(toastId);
+    } else if (activeToast?.kind === "prompt") {
+      toastManager.close(activeToast.toastId);
+    }
+    if (
+      activeToast &&
+      (toastId === undefined || (activeToast.kind === "prompt" && activeToast.toastId === toastId))
+    ) {
+      activeToastRef.current = null;
+    }
+    openSettings("providers");
+  }, []);
 
   useEffect(() => {
     const activeToast = activeToastRef.current;

@@ -3,7 +3,6 @@ import {
   scopedThreadKey,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { pullRequestDetailToVcsStatus } from "@t3tools/client-runtime/state/pull-requests";
 import type { EnvironmentId, ThreadLinkedPullRequest, VcsStatusResult } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
@@ -12,7 +11,6 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
-import { linkedPullRequestDetailAtom } from "../state/pullRequests";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { vcsEnvironment } from "../state/vcs";
 import { useUiStateStore } from "../uiStateStore";
@@ -45,36 +43,10 @@ export interface LinkedThreadPullRequestStatus {
 }
 
 export function useLinkedThreadPullRequest(
-  environmentId: EnvironmentId | null,
-  linkedPullRequest: ThreadLinkedPullRequest | null | undefined,
+  _environmentId: EnvironmentId | null,
+  _linkedPullRequest: ThreadLinkedPullRequest | null | undefined,
 ): LinkedThreadPullRequestStatus | null {
-  const detail = useEnvironmentQuery(
-    environmentId === null || linkedPullRequest == null
-      ? null
-      : linkedPullRequestDetailAtom({
-          environmentId,
-          input: {
-            projectId: linkedPullRequest.projectId,
-            repository: linkedPullRequest.repository,
-            number: linkedPullRequest.number,
-          },
-        }),
-  ).data;
-
-  return useMemo(
-    () =>
-      detail === null
-        ? null
-        : {
-            pr: pullRequestDetailToVcsStatus(detail),
-            sourceControlProvider: {
-              kind: detail.provider,
-              name: detail.provider,
-              baseUrl: "",
-            },
-          },
-    [detail],
-  );
+  return null;
 }
 
 export function settledPrHoverColorClass(state: NonNullable<ThreadPr>["state"]): string {

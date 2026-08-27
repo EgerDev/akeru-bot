@@ -4,7 +4,12 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_RUNTIME_MODE,
+  type RuntimeMode,
+  type ScopedProjectRef,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -73,6 +78,7 @@ export function useNewThreadHandler() {
         worktreePath?: string | null;
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
+        runtimeMode?: RuntimeMode;
         replace?: boolean;
         /**
          * Move the viewed draft's typed content (prompt + images) into the
@@ -126,6 +132,7 @@ export function useNewThreadHandler() {
       const carryModelSelection =
         composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
       const carryRuntimeMode =
+        options?.runtimeMode ??
         carrySourceComposer?.runtimeMode ??
         carrySourceShell?.runtimeMode ??
         carrySourceDraft?.runtimeMode ??

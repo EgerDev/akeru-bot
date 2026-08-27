@@ -37,6 +37,7 @@ import React, {
   useCallback,
   memo,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -49,6 +50,9 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import { remarkGithubAlerts } from "../markdown-github-alerts";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
@@ -284,6 +288,8 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkMath,
+  remarkTagMathNodes,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkPreserveCodeMeta,
@@ -292,6 +298,8 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
 
 const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGfm,
+  remarkMath,
+  remarkTagMathNodes,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkBreaks,
@@ -299,7 +307,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkNormalizeLinksAndTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
-const CHAT_MARKDOWN_REHYPE_PLUGINS = [
+const CHAT_MARKDOWN_REHYPE_PLUGINS_WITH_RAW_HTML = [
   rehypeRaw,
   rehypeNormalizeWindowsImageSrc,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
@@ -383,11 +391,37 @@ type MarkdownAstNode = {
   type?: string;
   meta?: unknown;
   url?: string;
+  value?: string;
+  lang?: string;
   data?: {
+    hName?: string;
     hProperties?: Record<string, unknown>;
   };
   children?: MarkdownAstNode[];
 };
+
+function remarkTagMathNodes() {
+  return (tree: MarkdownAstNode) => {
+    const visit = (node: MarkdownAstNode) => {
+      if (node.type === "inlineMath" && typeof node.value === "string") {
+        node.type = "inlineCode";
+        node.data = {
+          ...node.data,
+          hProperties: {
+            ...node.data?.hProperties,
+            dataMathExpression: node.value,
+          },
+        };
+      } else if (node.type === "math" && typeof node.value === "string") {
+        node.type = "code";
+        node.lang = "math";
+      }
+      node.children?.forEach(visit);
+    };
+
+    visit(tree);
+  };
+}
 
 function remarkPreserveCodeMeta() {
   return (tree: MarkdownAstNode) => {
@@ -668,6 +702,82 @@ function MarkdownDetails({
         </div>
       </CollapsiblePanel>
     </Collapsible>
+  );
+}
+
+function MarkdownMathExpression({
+  expression,
+  displayMode,
+}: {
+  readonly expression: string;
+  readonly displayMode: boolean;
+}) {
+  const html = katex.renderToString(expression, {
+    displayMode,
+    output: "htmlAndMathml",
+    strict: "warn",
+    throwOnError: false,
+    trust: false,
+  });
+  return (
+    <span
+      className={displayMode ? "chat-markdown-math-block" : "chat-markdown-math-inline"}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+function MarkdownMermaidDiagram({
+  code,
+  theme,
+}: {
+  readonly code: string;
+  readonly theme: "light" | "dark";
+}) {
+  const reactId = useId();
+  const [svg, setSvg] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setSvg(null);
+    setFailed(false);
+
+    void import("mermaid")
+      .then(async ({ default: mermaid }) => {
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: theme === "dark" ? "dark" : "default",
+        });
+        const result = await mermaid.render(`mermaid-${reactId.replaceAll(":", "")}`, code);
+        if (active) setSvg(result.svg);
+      })
+      .catch((cause: unknown) => {
+        reportMarkdownActionFailure({ operation: "render-mermaid", language: "mermaid" }, cause);
+        if (active) setFailed(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [code, reactId, theme]);
+
+  return (
+    <div
+      className="chat-markdown-mermaid my-3 overflow-x-auto rounded-lg border border-border bg-muted/20 p-3"
+      data-mermaid-diagram=""
+    >
+      {svg ? (
+        <div aria-label="Mermaid diagram" role="img" dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : failed ? (
+        <pre className="m-0">
+          <code className="language-mermaid">{code}</code>
+        </pre>
+      ) : (
+        <p className="m-0 text-xs text-muted-foreground">Rendering diagram…</p>
+      )}
+    </div>
   );
 }
 
@@ -1744,29 +1854,8 @@ function ChatMarkdown({
   }, []);
   const openChangeRequestLink = useOpenChangeRequestLink(threadRef);
   const resolveThreadPullRequest = useCallback(
-    (href: string): ThreadLinkedPullRequest | null => {
-      if (
-        threadRef === undefined ||
-        readThreadShell(threadRef) === null ||
-        threadServerConfig?.environment.capabilities.threadPullRequestLinking !== true
-      ) {
-        return null;
-      }
-      const parsed = parseChangeRequestUrl(href);
-      if (parsed === null) return null;
-      const project = findProjectForChangeRequest(
-        projects.filter((candidate) => candidate.environmentId === threadRef.environmentId),
-        parsed,
-      );
-      if (project === undefined) return null;
-      return {
-        projectId: project.id,
-        repository: project.repositoryIdentity?.displayName ?? parsed.repository,
-        number: parsed.number,
-        url: href,
-      };
-    },
-    [projects, threadRef, threadServerConfig],
+    (_href: string): ThreadLinkedPullRequest | null => null,
+    [],
   );
   const updateThreadPullRequestLink = useCallback(
     async (href: string, linked: boolean) => {
@@ -2131,6 +2220,10 @@ function ChatMarkdown({
         );
       },
       code({ node, children, className, ...props }) {
+        const mathExpression = node?.properties?.dataMathExpression;
+        if (typeof mathExpression === "string") {
+          return <MarkdownMathExpression expression={mathExpression} displayMode={false} />;
+        }
         if (node?.properties?.dataInlineCode != null) {
           const codeText = nodeToPlainText(children);
           const fileLinkMeta =
@@ -2185,6 +2278,12 @@ function ChatMarkdown({
         }
 
         const language = extractFenceLanguage(codeBlock.className);
+        if (language.toLowerCase() === "math") {
+          return <MarkdownMathExpression expression={codeBlock.code} displayMode />;
+        }
+        if (language.toLowerCase() === "mermaid") {
+          return <MarkdownMermaidDiagram code={codeBlock.code} theme={resolvedTheme} />;
+        }
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
         return (
           <MarkdownCodeBlock
@@ -2248,7 +2347,7 @@ function ChatMarkdown({
         remarkPlugins={
           lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS
         }
-        rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+        rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS_WITH_RAW_HTML : undefined}
         skipHtml={false}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}

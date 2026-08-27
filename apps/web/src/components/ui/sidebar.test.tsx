@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  Sidebar,
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuSubButton,
@@ -48,6 +49,22 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain("[-webkit-app-region:no-drag]");
     expect(html).toContain("size-[var(--workspace-titlebar-control-size)]!");
+    expect(html).toContain('stroke-width="1.55"');
+    expect(html).toContain("size-[19px]");
+  });
+
+  it("uses the roster spring curve and respects reduced motion", () => {
+    const html = renderToStaticMarkup(
+      <SidebarProvider defaultOpen={false}>
+        <Sidebar collapsible="icon">
+          <div />
+        </Sidebar>
+      </SidebarProvider>,
+    );
+
+    expect(html).toContain("duration-[320ms]");
+    expect(html).toContain("ease-[cubic-bezier(0.22,1.18,0.36,1)]");
+    expect(html).toContain("motion-reduce:transition-none");
   });
 
   it("uses shared geometry and icon constraints for menu buttons by default", () => {

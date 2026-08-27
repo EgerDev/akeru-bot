@@ -7,18 +7,14 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
-import LegacyThreadSidebar from "./LegacySidebar";
-import ThreadSidebar from "./Sidebar";
-import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
-import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import BotRosterSidebar from "./roster/BotRosterSidebar";
+import { openSettings } from "~/settingsDialogStore";
 import {
   resolveSidebarStageFocusRingOffsetClass,
   useSidebarStageBackdropVariant,
@@ -64,15 +60,16 @@ function readInitialThreadSidebarWidth(): number {
   }
 }
 
-function SidebarControl() {
+function SidebarControl({ stageArtworkVisible }: { stageArtworkVisible: boolean }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { toggleSidebar } = useSidebar();
+  const { isMobile, toggleSidebar } = useSidebar();
   const isSidebarVisible = useSidebarVisibility();
-  const environmentIdentificationMode = useEnvironmentIdentificationMode();
-  const stageBackdropVariant = useSidebarStageBackdropVariant(
-    environmentIdentificationMode === "artwork",
-  );
+  const stageBackdropVariant = useSidebarStageBackdropVariant(stageArtworkVisible);
   const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggle");
+  // The roster has no collapse button. Its rail reopens through the shortcut
+  // or the rail edge. Mobile and the legacy offcanvas sidebar still need this
+  // global opener.
+  const showTrigger = isMobile;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -94,6 +91,10 @@ function SidebarControl() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, toggleSidebar]);
+
+  if (!showTrigger) {
+    return null;
+  }
 
   return (
     // The right-side layout controls carry mr-px (border compensation inside
@@ -137,12 +138,7 @@ function ProjectProjectionRetention() {
 }
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
-  const navigate = useNavigate();
-  const legacySidebarEnabled = useLegacySidebarEnabled();
-  // Settings routes show the settings nav in place of whichever thread
-  // sidebar is active.
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
+  const stageArtworkVisible = false;
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
@@ -196,24 +192,21 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
     const unsubscribe = onMenuAction((action) => {
       if (action === "open-settings") {
-        const isSettingsRoute = /^\/settings(\/|$)/.test(pathname);
-        if (!isSettingsRoute) {
-          void navigate({ to: "/settings" });
-        }
+        openSettings();
       }
     });
 
     return () => {
       unsubscribe?.();
     };
-  }, [navigate, pathname]);
+  }, []);
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
       <ProjectProjectionRetention />
       <Sidebar
         side="left"
-        collapsible="offcanvas"
+        collapsible="icon"
         data-app-sidebar=""
         className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
         resizable={{
@@ -226,20 +219,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           onResize: setSidebarWidth,
         }}
       >
-        {isOnSettings ? (
-          <>
-            <SidebarChromeHeader isElectron={isElectron} />
-            <SettingsSidebarNav pathname={pathname} />
-          </>
-        ) : legacySidebarEnabled ? (
-          <LegacyThreadSidebar />
-        ) : (
-          <ThreadSidebar />
-        )}
+        <BotRosterSidebar />
         <SidebarRail onDoubleClick={resetSidebarWidth} />
       </Sidebar>
       {children}
-      <SidebarControl />
+      <SidebarControl stageArtworkVisible={stageArtworkVisible} />
     </SidebarProvider>
   );
 }

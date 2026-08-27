@@ -1,23 +1,17 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { LinkIcon, PlusIcon } from "lucide-react";
+import { useEffect } from "react";
 
-import { openCommandPalette } from "../commandPaletteBus";
-import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
+import { APP_DISPLAY_NAME } from "~/branding";
+import { hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { resolveRosterBotId } from "../components/roster/roster.logic";
+import { useRosterStore } from "../components/roster/rosterStore";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import {
-  useAllEnvironmentShellsBootstrapped,
-  useProjects,
-  useThreadShells,
-} from "../state/entities";
+import { openSettings } from "../settingsDialogStore";
 import { useEnvironments } from "../state/environments";
-import { APP_DISPLAY_NAME } from "~/branding";
-import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
@@ -27,107 +21,27 @@ function ChatIndexRouteView() {
     return <HostedStaticOnboardingState />;
   }
 
-  return <IndexDraftLanding />;
+  return <BotIndexRedirect />;
 }
 
-/**
- * Landing on the index route drops straight into a draft thread for the most
- * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
- */
-function IndexDraftLanding() {
-  const projects = useProjects();
-  const threads = useThreadShells();
-  const bootstrapped = useAllEnvironmentShellsBootstrapped();
-  const handleNewThread = useNewThreadHandler();
-  const startingRef = useRef(false);
-  const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
-
-  const mostRecentProject = useMemo(
-    () =>
-      bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
-        : null,
-    [bootstrapped, projects, threads],
-  );
+function BotIndexRedirect() {
+  const navigate = useNavigate();
+  const botId = useRosterStore((state) => resolveRosterBotId(state.selectedBotId, state.bots));
 
   useEffect(() => {
-    if (mostRecentProject === null || startingRef.current) {
-      return;
-    }
-    startingRef.current = true;
-    void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
-      replace: true,
-    }).catch(() => {
-      startingRef.current = false;
-      setStartState((state) => ({ ...state, failed: true }));
-    });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+    if (botId === null) return;
+    void navigate({ to: "/bots/$botId", params: { botId }, replace: true });
+  }, [botId, navigate]);
 
-  if (!bootstrapped) {
-    return null;
-  }
-  if (mostRecentProject !== null) {
-    return startState.failed ? (
-      <DraftStartError
-        onRetry={() => {
-          setStartState((state) => ({
-            failed: false,
-            retryRequest: state.retryRequest + 1,
-          }));
-        }}
-      />
-    ) : null;
-  }
-  return <NoProjectsHero />;
-}
+  if (botId !== null) return null;
 
-function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
       <Empty className="flex-1">
-        <EmptyHeader className="max-w-md">
-          <EmptyTitle className="text-foreground text-xl">Couldn’t start a new thread</EmptyTitle>
-          <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-            The project is still available. Try opening the draft again.
-          </EmptyDescription>
-          <div className="mt-5 flex justify-center">
-            <Button size="sm" onClick={onRetry}>
-              <RotateCcwIcon className="size-4" />
-              Try again
-            </Button>
-          </div>
+        <EmptyHeader>
+          <EmptyTitle>Create a bot to start chatting</EmptyTitle>
         </EmptyHeader>
       </Empty>
-    </SidebarInset>
-  );
-}
-
-function NoProjectsHero() {
-  const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
-
-  return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
-        <Empty className="flex-1">
-          <div className="w-full max-w-lg px-8 py-12">
-            <EmptyHeader className="max-w-none">
-              <EmptyTitle className="text-foreground text-2xl sm:text-3xl">
-                What should we work on?
-              </EmptyTitle>
-              <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                Add a project to start your first thread.
-              </EmptyDescription>
-              <div className="mt-6 flex justify-center">
-                <Button size="sm" onClick={openAddProject}>
-                  <PlusIcon className="size-4" />
-                  Add project
-                </Button>
-              </div>
-            </EmptyHeader>
-          </div>
-        </Empty>
-      </div>
     </SidebarInset>
   );
 }
@@ -161,11 +75,11 @@ function HostedStaticOnboardingState() {
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm leading-relaxed text-muted-foreground/78">
                 {cloudEnabled
-                  ? "Sign in to T3 Connect to connect a linked environment through its managed tunnel, or add a reachable backend manually."
+                  ? "Sign in to connect a linked environment through its managed tunnel, or add a reachable backend manually."
                   : "Add a reachable backend manually to start working from this browser."}
               </EmptyDescription>
               <div className="mt-6 flex justify-center">
-                <Button render={<Link to="/settings/connections" />} size="sm">
+                <Button size="sm" onClick={() => openSettings("connections")}>
                   <PlusIcon className="size-4" />
                   {cloudEnabled ? "Open Connections" : "Add environment"}
                 </Button>

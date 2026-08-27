@@ -1,3 +1,4 @@
+import * as NodeUrl from "node:url";
 import * as NodeZlib from "node:zlib";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -13,6 +14,8 @@ import pkg from "./package.json" with { type: "json" };
 import { DEV_PROXIED_PATH_PREFIXES } from "@t3tools/shared/devProxy";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config";
+
+const reactGrabEntry = NodeUrl.fileURLToPath(import.meta.resolve("react-grab"));
 
 const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
@@ -170,7 +173,6 @@ export default defineConfig(() => {
     ],
     optimizeDeps: {
       include: [
-        "@clerk/clerk-js",
         "@clerk/react/internal",
         "@pierre/diffs",
         "@pierre/diffs/editor",
@@ -179,6 +181,7 @@ export default defineConfig(() => {
         "effect/Array",
         "effect/Order",
         "react-dom/client",
+        "react-grab",
       ],
     },
     define: {
@@ -205,7 +208,10 @@ export default defineConfig(() => {
     },
     resolve: {
       tsconfigPaths: true,
-      dedupe: ["react", "react-dom"],
+      dedupe: ["react", "react-dom", "effect"],
+      alias: {
+        "react-grab": reactGrabEntry,
+      },
     },
     experimental: {
       bundledDev,

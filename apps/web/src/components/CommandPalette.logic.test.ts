@@ -4,6 +4,7 @@ import type { Thread } from "../types";
 import {
   browseInputEndPaddingClass,
   buildBrowseGroups,
+  buildModelPickerCommandPaletteAction,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
   filterPinnedBrowseEntries,
@@ -109,6 +110,55 @@ describe("reduceCommandPaletteUiState", () => {
       mode: "command",
       openIntent: null,
     });
+  });
+});
+
+describe("buildModelPickerCommandPaletteAction", () => {
+  it("closes the command palette and schedules the shared handle opener", async () => {
+    const events: string[] = [];
+    const openModelPicker = vi.fn(() => events.push("open-model-picker"));
+    let scheduled: (() => void) | null = null;
+    const action = buildModelPickerCommandPaletteAction({
+      composerHandle: { openModelPicker },
+      closePalette: () => events.push("close-command-palette"),
+      scheduleAfterClose: (open) => {
+        events.push("schedule-model-picker");
+        scheduled = open;
+      },
+      icon: null,
+    });
+
+    expect(action).toMatchObject({
+      value: "action:change-model",
+      title: "Change model",
+      disabled: false,
+      keepOpen: true,
+      shortcutCommand: "modelPicker.toggle",
+    });
+    await action.run();
+    expect(events).toEqual(["close-command-palette", "schedule-model-picker"]);
+    expect(openModelPicker).not.toHaveBeenCalled();
+
+    expect(scheduled).not.toBeNull();
+    scheduled!();
+    expect(openModelPicker).toHaveBeenCalledOnce();
+    expect(events).toEqual(["close-command-palette", "schedule-model-picker", "open-model-picker"]);
+  });
+
+  it("disables the action when no composer handle exists", async () => {
+    const closePalette = vi.fn();
+    const scheduleAfterClose = vi.fn();
+    const action = buildModelPickerCommandPaletteAction({
+      composerHandle: null,
+      closePalette,
+      scheduleAfterClose,
+      icon: null,
+    });
+
+    expect(action.disabled).toBe(true);
+    await action.run();
+    expect(closePalette).not.toHaveBeenCalled();
+    expect(scheduleAfterClose).not.toHaveBeenCalled();
   });
 });
 

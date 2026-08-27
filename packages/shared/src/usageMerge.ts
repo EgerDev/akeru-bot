@@ -8,8 +8,10 @@
  */
 import type {
   EnvironmentId,
+  SubscriptionProviderId,
   UsageBucket,
   UsageProviderKind,
+  UsageProviderPlanLimits,
   UsageSourceFingerprint,
   UsageSummary,
 } from "@t3tools/contracts";
@@ -80,6 +82,7 @@ export interface MergedUsage {
   readonly duplicateSources: readonly string[];
   readonly contributingEnvironments: readonly EnvironmentId[];
   readonly staleEnvironments: readonly EnvironmentId[];
+  readonly planLimits: readonly UsageProviderPlanLimits[];
 }
 
 /**
@@ -195,6 +198,7 @@ const EMPTY_MERGED: MergedUsage = {
   duplicateSources: [],
   contributingEnvironments: [],
   staleEnvironments: [],
+  planLimits: [],
 };
 
 /**
@@ -413,5 +417,21 @@ export function mergeUsage(
     duplicateSources: duplicates,
     contributingEnvironments,
     staleEnvironments,
+    planLimits: mergePlanLimits(current),
   };
+}
+
+function mergePlanLimits(
+  environments: readonly EnvironmentUsage[],
+): readonly UsageProviderPlanLimits[] {
+  const byProvider = new Map<SubscriptionProviderId, UsageProviderPlanLimits>();
+  for (const environment of environments) {
+    for (const limits of environment.summary.planLimits ?? []) {
+      const existing = byProvider.get(limits.provider);
+      if (existing === undefined || (existing.status !== "ok" && limits.status === "ok")) {
+        byProvider.set(limits.provider, limits);
+      }
+    }
+  }
+  return [...byProvider.values()];
 }

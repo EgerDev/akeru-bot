@@ -1,7 +1,8 @@
 import { UserButton, useAuth } from "@clerk/react";
-import { LogInIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
+import { Login01Icon, ServerIcon, SmartphoneIcon } from "@hugeicons/core-free-icons";
 
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
+import { AppIcon } from "../ui/app-icon";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
 import { T3ConnectUserProfilePage } from "./T3ConnectUserProfilePage";
@@ -26,23 +27,28 @@ function ConfiguredT3ConnectSidebarAvatar() {
 
   return (
     <UserButton
+      showName
       appearance={{
         elements: {
-          avatarBox: "size-7",
-          userButtonTrigger: "rounded-lg p-1 hover:bg-sidebar-row-hover",
+          rootBox: "w-full",
+          userButtonBox: "w-full",
+          avatarBox: "size-8 ring-1 ring-sidebar-border",
+          userButtonTrigger:
+            "w-full min-h-11 justify-start gap-2.5 rounded-lg px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring",
+          userButtonOuterIdentifier: "min-w-0 truncate text-sm font-medium",
         },
       }}
     >
       <UserButton.UserProfilePage
         label="Mobile clients"
-        labelIcon={<SmartphoneIcon className="size-4" />}
+        labelIcon={<AppIcon className="size-4" icon={SmartphoneIcon} />}
         url="mobile-clients"
       >
         <MobileClientsUserProfilePage />
       </UserButton.UserProfilePage>
       <UserButton.UserProfilePage
-        label="T3 Connect"
-        labelIcon={<ServerIcon className="size-4" />}
+        label="Linked environments"
+        labelIcon={<AppIcon className="size-4" icon={ServerIcon} />}
         url="t3-connect"
       >
         <T3ConnectUserProfilePage />
@@ -62,8 +68,8 @@ function ConfiguredT3ConnectSidebarSignIn() {
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton onClick={openAuthPrompt}>
-            <LogInIcon />
-            <span>Sign in to T3 Connect</span>
+            <AppIcon icon={Login01Icon} />
+            <span>Sign in for remote access</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

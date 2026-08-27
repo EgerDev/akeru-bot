@@ -506,6 +506,67 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   return "ready";
 }
 
+export interface SidebarProjectSection<TGroup, TThread> {
+  group: TGroup;
+  threads: TThread[];
+}
+
+/**
+ * Splits the already-sorted active thread list into per-project sections for
+ * the grouped sidebar presentation. Section order follows the given project
+ * group order, thread order inside a section follows the input order, and
+ * groups with no active threads get no section. Threads whose project is in
+ * no known group (project removed, or its environment not loaded) come back
+ * in `ungroupedThreads`, still in input order: they keep rendering after the
+ * sections, without a header, because the shell carries nothing truthful to
+ * label them with.
+ */
+export function buildSidebarProjectSections<
+  TGroup extends {
+    readonly projectKey: string;
+    readonly memberProjectRefs: readonly { environmentId: string; projectId: string }[];
+  },
+  TThread extends { readonly environmentId: string; readonly projectId: string },
+>(input: {
+  groups: readonly TGroup[];
+  threads: readonly TThread[];
+}): {
+  sections: SidebarProjectSection<TGroup, TThread>[];
+  ungroupedThreads: TThread[];
+} {
+  const groupKeyByProjectRef = new Map<string, string>();
+  for (const group of input.groups) {
+    for (const projectRef of group.memberProjectRefs) {
+      groupKeyByProjectRef.set(
+        `${projectRef.environmentId}\0${projectRef.projectId}`,
+        group.projectKey,
+      );
+    }
+  }
+  const threadsByGroupKey = new Map<string, TThread[]>();
+  const ungroupedThreads: TThread[] = [];
+  for (const thread of input.threads) {
+    const groupKey = groupKeyByProjectRef.get(`${thread.environmentId}\0${thread.projectId}`);
+    if (groupKey === undefined) {
+      ungroupedThreads.push(thread);
+      continue;
+    }
+    const existing = threadsByGroupKey.get(groupKey);
+    if (existing) {
+      existing.push(thread);
+    } else {
+      threadsByGroupKey.set(groupKey, [thread]);
+    }
+  }
+  const sections: SidebarProjectSection<TGroup, TThread>[] = [];
+  for (const group of input.groups) {
+    const groupThreads = threadsByGroupKey.get(group.projectKey);
+    if (groupThreads === undefined) continue;
+    sections.push({ group, threads: groupThreads });
+  }
+  return { sections, ungroupedThreads };
+}
+
 /** NaN-safe Date.parse for sort comparators: a malformed timestamp must not
     poison the whole ordering, so it sinks to the epoch instead. */
 export function parseTimestampMs(isoDate: string): number {

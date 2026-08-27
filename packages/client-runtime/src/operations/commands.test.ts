@@ -1,6 +1,9 @@
 import {
+  BotId,
   CommandId,
   EnvironmentId,
+  GroupId,
+  McpServerId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   ThreadId,
@@ -23,10 +26,15 @@ import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
+  assignGroupMember,
+  createMcpServer,
   createProject,
   settleThread,
+  setGroupBoss,
   stopThreadSession,
+  unassignGroupMember,
   unsettleThread,
+  updateMcpServer,
 } from "./commands.ts";
 
 const TEST_CRYPTO_LAYER = Layer.succeed(
@@ -95,6 +103,85 @@ describe("environment commands", () => {
           workspaceRoot: "/workspace/project",
           createdAt: "2026-06-06T00:00:00.000Z",
         },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches both MCP transport configurations", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      const mcpServerId = McpServerId.make("mcp-server-1");
+
+      yield* createMcpServer({
+        commandId: CommandId.make("mcp-create"),
+        mcpServerId,
+        name: "Filesystem",
+        transport: "stdio",
+        command: "bunx",
+        args: ["server-filesystem"],
+        createdAt: "2026-06-06T00:00:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* updateMcpServer({
+        commandId: CommandId.make("mcp-update"),
+        mcpServerId,
+        name: "Remote",
+        transport: "url",
+        url: "https://mcp.example.com",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "mcp-server.create",
+          commandId: "mcp-create",
+          mcpServerId: "mcp-server-1",
+          name: "Filesystem",
+          transport: "stdio",
+          command: "bunx",
+          args: ["server-filesystem"],
+          createdAt: "2026-06-06T00:00:00.000Z",
+        },
+        {
+          type: "mcp-server.update",
+          commandId: "mcp-update",
+          mcpServerId: "mcp-server-1",
+          name: "Remote",
+          transport: "url",
+          url: "https://mcp.example.com",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches reversible group membership commands", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      const groupId = GroupId.make("group-1");
+      const botId = BotId.make("bot-1");
+
+      yield* assignGroupMember({
+        commandId: CommandId.make("assign-member"),
+        groupId,
+        botId,
+        role: "specialist",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* unassignGroupMember({
+        commandId: CommandId.make("unassign-member"),
+        groupId,
+        botId,
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* setGroupBoss({
+        commandId: CommandId.make("set-boss"),
+        groupId,
+        bossBotId: botId,
+        unassignPreviousBoss: true,
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched.map((command) => command.type)).toEqual([
+        "group.member.assign",
+        "group.member.unassign",
+        "group.boss.set",
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );

@@ -63,6 +63,7 @@ describe("mobile themes", () => {
   });
 
   it("shares all built-in desktop palettes", () => {
+    expect(BUILT_IN_THEME_IDS).toContain("akeru-paper");
     expect(BUILT_IN_THEMES.map((theme) => theme.id)).toEqual(BUILT_IN_THEME_IDS);
     for (const themeId of BUILT_IN_THEME_IDS) {
       expect(getMobileThemeVariables(themeId, "light")["--color-screen"]).toMatch(/^#/);

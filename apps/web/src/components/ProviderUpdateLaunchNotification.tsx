@@ -1,4 +1,3 @@
-import { useNavigate } from "@tanstack/react-router";
 import { DownloadIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -15,6 +14,7 @@ import {
 } from "./ProviderUpdateLaunchNotification.logic";
 import { ProviderUpdatePrimaryNotification } from "./ProviderUpdatePrimaryNotification";
 import { stackedThreadToast, toastManager } from "./ui/toast";
+import { openSettings } from "~/settingsDialogStore";
 
 /**
  * True when a desktop-local secondary backend (the parallel WSL backend) is
@@ -56,7 +56,6 @@ type ProviderUpdateToastId = ReturnType<typeof toastManager.add>;
 const SETTLING_GRACE_MS = 30_000;
 
 function ProviderUpdateEnvironmentsNotification() {
-  const navigate = useNavigate();
   const { groups, isAnySettling } = useLocalEnvironmentUpdateGroups();
   const { dismissedNotificationKeys, dismissNotificationKey } =
     useDismissedProviderUpdateNotificationKeys();
@@ -113,8 +112,8 @@ function ProviderUpdateEnvironmentsNotification() {
       toastManager.close(active.toastId);
       activeToastRef.current = null;
     }
-    void navigate({ to: "/settings/providers" });
-  }, [navigate]);
+    openSettings("providers");
+  }, []);
 
   useEffect(() => {
     // Whether a fresh prompt can actually be shown for the current update set.

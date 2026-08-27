@@ -728,6 +728,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
     }),
+    subscriptionAuth: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:subscription-auth",
+      tag: WS_METHODS.subscriptionAuthList,
+      staleTimeMs: 5_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",
@@ -769,6 +774,26 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverUpdateSettings,
       scheduler: configScheduler,
       concurrency: configConcurrency,
+    }),
+    startSubscriptionAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:subscription-auth:start",
+      tag: WS_METHODS.subscriptionAuthStart,
+    }),
+    pollSubscriptionAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:subscription-auth:poll",
+      tag: WS_METHODS.subscriptionAuthPoll,
+    }),
+    completeSubscriptionAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:subscription-auth:complete",
+      tag: WS_METHODS.subscriptionAuthComplete,
+    }),
+    cancelSubscriptionAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:subscription-auth:cancel",
+      tag: WS_METHODS.subscriptionAuthCancel,
+    }),
+    logoutSubscriptionAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:subscription-auth:logout",
+      tag: WS_METHODS.subscriptionAuthLogout,
     }),
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",

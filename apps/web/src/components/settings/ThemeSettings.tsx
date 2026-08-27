@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { cn } from "../../lib/utils";
 import {
+  BUILT_IN_THEMES,
   getThemeDefinition,
   getThemeModes,
   removeCustomThemes,
@@ -19,11 +20,6 @@ import {
   type ThemeAppearance,
   type ThemeDefinition,
   type ThemeHalves,
-  T3_CHAT_THEME,
-  EMBER_THEME,
-  GROVE_THEME,
-  IRIS_THEME,
-  OCEAN_THEME,
 } from "../../themePalette";
 import {
   AlertDialog,
@@ -50,13 +46,7 @@ import {
 } from "./ThemePreviewCircles";
 import { ThemeWireframe } from "./ThemeWireframe";
 
-const MAINTAINER_THEMES: ReadonlyArray<ThemeDefinition> = [
-  T3_CHAT_THEME,
-  GROVE_THEME,
-  OCEAN_THEME,
-  EMBER_THEME,
-  IRIS_THEME,
-];
+const MAINTAINER_THEMES: ReadonlyArray<ThemeDefinition> = BUILT_IN_THEMES;
 
 function collectionVariantLabels(themes: ReadonlyArray<ThemeDefinition>): ReadonlyArray<string> {
   if (themes.length === 0) return [];
@@ -849,7 +839,7 @@ export function ThemeLibrary({
   return (
     <div className="space-y-3">
       <p className="px-3 text-[13px] leading-[1.45] text-muted-foreground/80 sm:px-4">
-        Choose how T3 Code looks. Use a built-in theme or make your own.
+        Choose how Akeru Bot looks. Use a built-in theme or make your own.
       </p>
       <h3 className="px-3 text-sm font-medium tracking-[-0.005em] text-foreground sm:px-4">
         Color scheme

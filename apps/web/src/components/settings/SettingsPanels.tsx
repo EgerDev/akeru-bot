@@ -1,5 +1,4 @@
 import { ArchiveIcon, ArchiveX, ChevronRightIcon, LoaderIcon, SettingsIcon } from "lucide-react";
-import { Link } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
@@ -55,6 +54,7 @@ import {
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { isElectron } from "../../env";
+import { openSettings } from "../../settingsDialogStore";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useCustomThemes } from "../../hooks/useCustomThemes";
 import {
@@ -488,6 +488,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.usageRefreshMinutes !== DEFAULT_UNIFIED_SETTINGS.usageRefreshMinutes
+        ? ["Usage refresh"]
+        : []),
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
         ? ["Visible threads"]
         : []),
@@ -578,6 +581,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
+      settings.usageRefreshMinutes,
       settings.wordWrap,
       followSystem,
       theme,
@@ -650,6 +654,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+      usageRefreshMinutes: DEFAULT_UNIFIED_SETTINGS.usageRefreshMinutes,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
@@ -1833,19 +1838,6 @@ function LegacyFeaturesSection() {
                 />
               }
             />
-            <SettingsRow
-              {...searchableSetting("legacy-sidebar")}
-              description="Brings back the original sidebar with per-project thread trees. The default sidebar shows one flat list: active work as rich cards, settled threads as compact rows."
-              control={
-                <Switch
-                  checked={settings.legacySidebarEnabled}
-                  onCheckedChange={(checked) =>
-                    updateSettings({ legacySidebarEnabled: Boolean(checked) })
-                  }
-                  aria-label="Sidebar (legacy)"
-                />
-              }
-            />
           </div>
         </CollapsiblePanel>
       </Collapsible>
@@ -2049,6 +2041,52 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
                   {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("usage-refresh")}
+          description="How often the Usage page reloads plan limits."
+          resetAction={
+            settings.usageRefreshMinutes !== DEFAULT_UNIFIED_SETTINGS.usageRefreshMinutes ? (
+              <SettingResetButton
+                label="usage refresh"
+                onClick={() =>
+                  updateSettings({
+                    usageRefreshMinutes: DEFAULT_UNIFIED_SETTINGS.usageRefreshMinutes,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={String(settings.usageRefreshMinutes)}
+              onValueChange={(value) => {
+                const minutes = Number(value);
+                if (minutes === 1 || minutes === 5 || minutes === 15 || minutes === 30) {
+                  updateSettings({ usageRefreshMinutes: minutes });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Usage refresh">
+                <SelectValue>{`${settings.usageRefreshMinutes} min`}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="1">
+                  1 min
+                </SelectItem>
+                <SelectItem hideIndicator value="5">
+                  5 min
+                </SelectItem>
+                <SelectItem hideIndicator value="15">
+                  15 min
+                </SelectItem>
+                <SelectItem hideIndicator value="30">
+                  30 min
                 </SelectItem>
               </SelectPopup>
             </Select>
@@ -2485,7 +2523,7 @@ export function GeneralSettingsPanel() {
           {...searchableSetting("diagnostics")}
           description={diagnosticsDescription}
           control={
-            <Button render={<Link to="/settings/diagnostics" />} size="xs" variant="outline">
+            <Button size="xs" variant="outline" onClick={() => openSettings("diagnostics")}>
               View diagnostics
             </Button>
           }
