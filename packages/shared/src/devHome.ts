@@ -1,12 +1,16 @@
 /**
- * Where development state lives, and how to keep it away from the shared
- * `~/.t3` that a user's installed T3 Code runs against.
+ * Where development state lives, and how to keep it away from T3 Code's
+ * `~/.t3` and from this product's live `~/.akeru`.
  *
- * A linked git worktree gets its own (gitignored) `.t3`: feature work in a
+ * A linked git worktree gets its own (gitignored) `.akeru`: feature work in a
  * throwaway branch must not share a database with the real app, and an ambient
- * `T3CODE_HOME` counts as an explicit base dir — flipping the state directory
- * from `<base>/dev` to `<base>/userdata`, the live production database.
+ * `T3CODE_HOME` or `AKERU_HOME` counts as an explicit base dir — flipping the
+ * state directory from `<base>/dev` to `<base>/userdata`, the live production
+ * database.
  */
+
+/** Product data directory name. Separate from T3 Code's `.t3`. */
+export const PRODUCT_HOME_DIRNAME = ".akeru";
 
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -99,5 +103,5 @@ export const resolveWorktreeT3Home = (
       return undefined;
     }
     const path = yield* Path.Path;
-    return path.join(worktreePath, ".t3");
+    return path.join(worktreePath, PRODUCT_HOME_DIRNAME);
   });

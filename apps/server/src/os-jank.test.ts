@@ -1,7 +1,11 @@
 import * as NodeOS from "node:os";
-import { assert, it } from "vite-plus/test";
+import * as Path from "effect/Path";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import { assert } from "vite-plus/test";
 
-import { hydratePosixHome } from "./os-jank.ts";
+import { hydratePosixHome, resolveBaseDir } from "./os-jank.ts";
 
 it("hydrates HOME for minimal service environments from the user account", () => {
   const env: NodeJS.ProcessEnv = {};
@@ -38,3 +42,11 @@ it("preserves an explicitly configured HOME", () => {
 
   assert.equal(env.HOME, "/custom/home");
 });
+
+it.effect("defaults the product home to ~/.akeru instead of T3 Code's ~/.t3", () =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const baseDir = yield* resolveBaseDir(undefined);
+    assert.equal(baseDir, path.join(NodeOS.homedir(), ".akeru"));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);

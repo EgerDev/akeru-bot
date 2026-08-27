@@ -125,8 +125,31 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.akeru/dev");
+      assert.equal(production.stateDir, "/Users/alice/.akeru/userdata");
+    }),
+  );
+
+  it.effect("brands Dev, Alpha, and Nightly display names as Akeru Bot", () =>
+    Effect.gen(function* () {
+      const development = yield* makeEnvironment(
+        {},
+        { VITE_DEV_SERVER_URL: "http://localhost:5173" },
+      );
+      const alpha = yield* makeEnvironment();
+      const nightly = yield* makeEnvironment({ appVersion: "0.0.22-nightly.20260101.1" });
+
+      assert.equal(development.displayName, "Akeru Bot (Dev)");
+      assert.equal(alpha.displayName, "Akeru Bot (Alpha)");
+      assert.equal(nightly.displayName, "Akeru Bot (Nightly)");
+      assert.deepEqual(alpha.branding, {
+        baseName: "Akeru Bot",
+        stageLabel: "Alpha",
+        displayName: "Akeru Bot (Alpha)",
+      });
+      assert.equal(alpha.userDataDirName, "akeru-bot");
+      assert.equal(development.userDataDirName, "akeru-bot-dev");
+      assert.equal(alpha.legacyUserDataDirName, "Akeru Bot (Alpha)");
     }),
   );
 

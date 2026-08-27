@@ -1,4 +1,6 @@
 {
+  "name": "Akeru Bot",
+  "short_name": "Akeru Bot",
   "id": "/",
   "start_url": "/",
   "scope": "/",

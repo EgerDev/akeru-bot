@@ -6,14 +6,15 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#111111" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
-        const DARK_BACKGROUND = "#0a0a0a";
+        const DARK_BACKGROUND = "#050505";
+        const DEFAULT_THEME = "akeru-paper";
         const CUSTOM_THEMES_STORAGE_KEY = "t3code:themes:v1";
         const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "t3code:theme-follow-system";
         const THEME_APPEARANCE_MODE_STORAGE_KEY = "t3code:theme-appearance-mode";
@@ -22,12 +23,12 @@
           light: {
             background: "#ffffff",
             foreground: "#262626",
-            accent: "#4f46e5",
+            accent: "#8B6FC9",
           },
           dark: {
-            background: "#0a0a0a",
+            background: "#050505",
             foreground: "#f5f5f5",
-            accent: "#818cf8",
+            accent: "#8B6FC9",
           },
         };
         // These are the runtime defaults used to complete a custom palette
@@ -51,6 +52,20 @@
         // Keep this small boot-time copy in sync with the built-in palettes so
         // the selected theme is visible before the app has mounted.
         const BUILT_IN_THEME_PALETTES = {
+          "akeru-paper": {
+            light: {
+              background: "oklch(0.958531 0.009845 87.471)",
+              foreground: "oklch(0.274878 0.007028 67.529)",
+              accent: "oklch(0.607447 0.134946 296.512)",
+              chrome: "oklch(0.931632 0.012785 86.832)",
+            },
+            dark: {
+              background: "oklch(0.114918 0 0)",
+              foreground: "oklch(0.967434 0.001326 286.375)",
+              accent: "oklch(0.607447 0.134946 296.512)",
+              chrome: "oklch(0.177638 0 0)",
+            },
+          },
           "t3-chat": {
             light: {
               background: "oklch(0.982446 0.010114 325.653)",
@@ -134,6 +149,7 @@
           "system",
           "light",
           "dark",
+          "akeru-paper",
           "t3-chat",
           "grove",
           "ocean",
@@ -231,7 +247,9 @@
           };
           const isLegacyT3ChatDark = storedTheme === "t3-chat-dark";
           const themeId =
-            storedTheme === null ? "" : (LEGACY_THEME_IDS[storedTheme] ?? storedTheme);
+            storedTheme === null || storedTheme === "system"
+              ? DEFAULT_THEME
+              : (LEGACY_THEME_IDS[storedTheme] ?? storedTheme);
           const legacyMode = isLegacyT3ChatDark ? "dark" : null;
           const builtInModes = BUILT_IN_THEME_MODES[themeId] ?? null;
           const customTheme = builtInModes ? null : findCustomTheme(themeId);
@@ -248,7 +266,7 @@
             storedTheme === "dark" ||
             storedTheme === "system" ||
             themeModes !== null;
-          const theme = isKnownTheme && storedTheme ? storedTheme : "system";
+          const theme = isKnownTheme ? (storedTheme ?? DEFAULT_THEME) : "system";
           const isThemed = isKnownTheme && themeModes !== null;
           const baseAppearance = customTheme ? customTheme.appearance : "light";
           const systemMode = prefersDark ? "dark" : "light";
@@ -266,7 +284,7 @@
               ? "system"
               : storedFollowSystem === "false"
                 ? preferenceMode
-                : theme === "system"
+                : theme === "system" || storedTheme === null
                   ? "system"
                   : preferenceMode;
           // A valid mix half for the wanted appearance takes over: it decides
@@ -360,7 +378,8 @@
           }
           // A resolved half is a selection even when the base theme is gone
           // (deleting the base leaves the mix pointing at a real theme).
-          const hasSelection = halfThemeId !== null || (isKnownTheme && storedTheme !== null);
+          const hasSelection =
+            halfThemeId !== null || isThemed || (isKnownTheme && storedTheme !== null);
           if (hasSelection) {
             document.documentElement.dataset.themeSelected = "true";
           } else {
@@ -417,7 +436,7 @@
       }
 
       html.dark body {
-        background: #0a0a0a;
+        background: #050505;
         color: #f5f5f5;
       }
 
@@ -453,13 +472,13 @@
         object-fit: contain;
       }
     </style>
-    <title>T3 Code (Alpha)</title>
+    <title>Akeru Bot (Alpha)</title>
   </head>
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="T3 Code splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T3 Code" />
+        <div id="boot-shell-card" aria-label="Akeru Bot splash screen">
+          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Akeru Bot" />
         </div>
       </div>
     </div>

@@ -2060,8 +2060,8 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+    ? "Akeru Bot (Nightly)"
+    : (desktopPackageJson.productName ?? "Akeru Bot");
 }
 
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -2120,7 +2120,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       protocols: [
         {
-          name: "T3 Code",
+          name: "Akeru Bot",
           schemes: ["t3code", "t3code-dev"],
         },
       ],
@@ -2168,7 +2168,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // t3code:// OAuth callbacks to the app.
       protocols: [
         {
-          name: "T3 Code",
+          name: "Akeru Bot",
           schemes: ["t3code", "t3code-dev"],
         },
       ],
