@@ -1,5 +1,6 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { useNavigation } from "@react-navigation/native";
@@ -103,7 +104,8 @@ export function SettingsRouteScreen() {
 function LocalSettingsRouteScreen() {
   const insets = useSafeAreaInsets();
   const { savedConnectionsById } = useSavedRemoteConnections();
-  const environmentCount = Object.keys(savedConnectionsById).length;
+  const connections = Object.values(savedConnectionsById);
+  const environmentCount = connections.length;
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -124,6 +126,8 @@ function LocalSettingsRouteScreen() {
             target="SettingsEnvironments"
           />
         </SettingsSection>
+
+        <ErrorsSettingsSection environmentId={connections[0]?.environmentId ?? null} />
 
         <GeneralSettingsSection />
 
@@ -511,6 +515,8 @@ function ConfiguredSettingsRouteScreen() {
           />
         </SettingsSection>
 
+        <ErrorsSettingsSection environmentId={connections[0]?.environmentId ?? null} />
+
         <GeneralSettingsSection />
 
         <SettingsSection title="Appearance">
@@ -524,6 +530,32 @@ function ConfiguredSettingsRouteScreen() {
         <AppSettingsSection />
       </ScrollView>
     </View>
+  );
+}
+
+function ErrorsSettingsSection({
+  environmentId,
+}: {
+  readonly environmentId: EnvironmentId | null;
+}) {
+  const navigation = useNavigation();
+  if (environmentId === null) return null;
+  return (
+    <SettingsSection title="Health">
+      <SettingsRow
+        icon="exclamationmark.triangle"
+        label="Errors"
+        onPress={() =>
+          navigation.navigate("SettingsSheet", {
+            screen: "SettingsContent",
+            params: {
+              screen: "SettingsProviderHealth",
+              params: { environmentId, target: "bot-inbox" },
+            },
+          })
+        }
+      />
+    </SettingsSection>
   );
 }
 

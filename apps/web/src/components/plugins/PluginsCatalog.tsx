@@ -1,15 +1,19 @@
 import type { McpServer } from "@t3tools/contracts";
-import { CheckIcon, ChevronRightIcon, PencilIcon, Trash2Icon } from "lucide-react";
-import type { PluginDefinition } from "../../../../../plugins";
+import { CheckIcon, ChevronRightIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import type { PluginDirectoryDefinition } from "../../../../../plugins";
 import { Button } from "../ui/button";
 import { findPluginServer, pluginMcpServerId } from "./pluginRegistry";
-import type { PluginFilter, PluginSection } from "./pluginPresentation";
+import {
+  pluginConnectionLabel,
+  pluginPrimaryAction,
+  type PluginSection,
+} from "./pluginPresentation";
 
 export function PluginLogoImage({
   plugin,
   className = "size-10",
 }: {
-  readonly plugin: PluginDefinition;
+  readonly plugin: PluginDirectoryDefinition;
   readonly className?: string;
 }) {
   return (
@@ -37,9 +41,8 @@ interface PluginsCatalogProps {
   readonly sections: readonly PluginSection[];
   readonly servers: readonly McpServer[];
   readonly pendingServerId: string | null;
-  readonly onToggle: (plugin: PluginDefinition, enabled: boolean) => void;
-  readonly onOpen: (plugin: PluginDefinition) => void;
-  readonly onViewAll: (filter: PluginFilter) => void;
+  readonly onToggle: (plugin: PluginDirectoryDefinition, enabled: boolean) => void;
+  readonly onOpen: (plugin: PluginDirectoryDefinition) => void;
 }
 
 function PluginRow({
@@ -48,16 +51,14 @@ function PluginRow({
   pending,
   onToggle,
   onOpen,
-  showCategory,
 }: {
-  readonly plugin: PluginDefinition;
+  readonly plugin: PluginDirectoryDefinition;
   readonly server: McpServer | undefined;
   readonly pending: boolean;
   readonly onToggle: (enabled: boolean) => void;
   readonly onOpen: () => void;
-  readonly showCategory: boolean;
 }) {
-  const installed = server?.enabled ?? false;
+  const action = pluginPrimaryAction(plugin, server);
   return (
     <article
       className="group flex min-w-0 items-center rounded-xl pe-2.5 transition-colors hover:bg-muted/45"
@@ -73,8 +74,12 @@ function PluginRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <h3 className="truncate text-sm font-medium leading-5">{plugin.title}</h3>
-            {showCategory ? (
-              <span className="shrink-0 text-[11px] text-muted-foreground">{plugin.category}</span>
+            <span className="shrink-0 text-[11px] text-muted-foreground">{plugin.category}</span>
+            {plugin.connection.type === "approval-pending" ||
+            plugin.connection.type === "verification-pending" ? (
+              <span className="shrink-0 text-[11px] text-warning-foreground">
+                {pluginConnectionLabel(plugin)}
+              </span>
             ) : null}
           </div>
           <p className="truncate text-xs leading-5 text-muted-foreground">{plugin.description}</p>
@@ -85,15 +90,15 @@ function PluginRow({
         />
       </button>
       <Button
-        aria-label={`${installed ? "Remove" : "Add"} ${plugin.title}`}
+        aria-label={`${action.label} ${plugin.title}`}
         className="h-7 min-w-14 rounded-full px-3 text-xs"
         size="sm"
         variant="secondary"
-        disabled={pending}
-        onClick={() => onToggle(!installed)}
+        disabled={pending || action.enable === null}
+        title={action.blocker}
+        onClick={() => action.enable !== null && onToggle(action.enable)}
       >
-        {installed ? <CheckIcon className="size-3.5" /> : null}
-        {installed ? "Added" : "Add"}
+        {action.label}
       </Button>
     </article>
   );
@@ -105,11 +110,12 @@ export function PluginsCatalog({
   pendingServerId,
   onToggle,
   onOpen,
-  onViewAll,
 }: PluginsCatalogProps) {
   const resultCount = sections.reduce((count, section) => count + section.plugins.length, 0);
   if (resultCount === 0) {
-    return <p className="py-14 text-center text-sm text-muted-foreground">No plugins match.</p>;
+    return (
+      <p className="py-14 text-center text-sm text-muted-foreground">No directory plugins match.</p>
+    );
   }
   return (
     <div className="space-y-7">
@@ -117,15 +123,6 @@ export function PluginsCatalog({
         <section aria-label={section.title} key={section.title}>
           <div className="mb-2 flex items-center justify-between px-2">
             <h2 className="text-xs font-medium text-muted-foreground">{section.title}</h2>
-            {section.showViewAll ? (
-              <button
-                className="cursor-pointer rounded text-xs text-muted-foreground outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                type="button"
-                onClick={() => onViewAll(section.filter)}
-              >
-                View all
-              </button>
-            ) : null}
           </div>
           <div className="grid grid-cols-1 gap-x-7 md:grid-cols-2">
             {section.plugins.map((plugin) => {
@@ -138,7 +135,6 @@ export function PluginsCatalog({
                   pending={pendingServerId === pluginMcpServerId(plugin)}
                   onToggle={(enabled) => onToggle(plugin, enabled)}
                   onOpen={() => onOpen(plugin)}
-                  showCategory={section.title === "Search results"}
                 />
               );
             })}
@@ -146,6 +142,56 @@ export function PluginsCatalog({
         </section>
       ))}
     </div>
+  );
+}
+
+export function RemovedBuiltinServers({
+  servers,
+  pendingServerId,
+  onDelete,
+}: {
+  readonly servers: readonly McpServer[];
+  readonly pendingServerId: string | null;
+  readonly onDelete: (server: McpServer) => void;
+}) {
+  if (servers.length === 0) return null;
+  return (
+    <section aria-labelledby="removed-plugins-title">
+      <div className="mb-2 flex items-center justify-between px-2">
+        <h2 className="text-xs font-medium text-muted-foreground" id="removed-plugins-title">
+          Removed plugins
+        </h2>
+        <span className="text-xs text-muted-foreground">{servers.length}</span>
+      </div>
+      <div className="grid grid-cols-1 gap-x-7 md:grid-cols-2">
+        {servers.map((server) => (
+          <div className="flex min-w-0 items-center gap-3 rounded-xl px-2.5 py-2.5" key={server.id}>
+            <span
+              aria-hidden="true"
+              className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted p-2"
+            >
+              <img alt="" className="size-full object-contain" src="/plugin-logos/mcp.svg" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{server.name}</p>
+              <p className="truncate text-xs leading-5 text-muted-foreground">
+                No longer in the directory · {server.enabled ? "Enabled" : "Disabled"}
+              </p>
+            </div>
+            <Button
+              aria-label={`Remove ${server.name}`}
+              className="h-7 rounded-full px-3 text-xs"
+              size="sm"
+              variant="secondary"
+              disabled={pendingServerId === server.id}
+              onClick={() => onDelete(server)}
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -158,6 +204,7 @@ function serverDescription(server: McpServer): string {
 interface CustomMcpServersProps {
   readonly servers: readonly McpServer[];
   readonly pendingServerId: string | null;
+  readonly onCreate: () => void;
   readonly onToggle: (server: McpServer, enabled: boolean) => void;
   readonly onEdit: (server: McpServer) => void;
   readonly onDelete: (server: McpServer) => void;
@@ -166,18 +213,24 @@ interface CustomMcpServersProps {
 export function CustomMcpServers({
   servers,
   pendingServerId,
+  onCreate,
   onToggle,
   onEdit,
   onDelete,
 }: CustomMcpServersProps) {
-  if (servers.length === 0) return null;
   return (
     <section aria-labelledby="custom-mcp-title">
       <div className="mb-2 flex items-center justify-between px-2">
         <h2 className="text-xs font-medium text-muted-foreground" id="custom-mcp-title">
           Custom MCP servers
         </h2>
-        <span className="text-xs text-muted-foreground">{servers.length}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{servers.length}</span>
+          <Button size="sm" variant="ghost-muted" onClick={onCreate}>
+            <PlusIcon className="size-3.5" />
+            Add server
+          </Button>
+        </div>
       </div>
       <div className="grid grid-cols-1 gap-x-7 md:grid-cols-2">
         {servers.map((server) => {

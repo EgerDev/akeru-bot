@@ -10,7 +10,67 @@ import {
 } from "./catalog";
 import { parsePluginManifestJson } from "./schema";
 
-const EXPECTED_IDS = ["context", "firecrawl", "exa", "parallel-search", "executor"];
+const EXPECTED_DIRECTORY_IDS = [
+  "ahrefs",
+  "apify",
+  "apollo",
+  "asana",
+  "atlassian",
+  "attio",
+  "canva",
+  "cloudflare",
+  "coda",
+  "context",
+  "customer-io",
+  "datadog",
+  "docusign",
+  "dropbox",
+  "exa",
+  "executor",
+  "figma",
+  "firecrawl",
+  "framer",
+  "github",
+  "help-scout",
+  "hubspot",
+  "intercom",
+  "lemon-squeezy",
+  "linear",
+  "mobbin",
+  "monday",
+  "netlify",
+  "notion",
+  "paddle",
+  "paper",
+  "parallel-search",
+  "paypal",
+  "pipedrive",
+  "posthog",
+  "railway",
+  "render",
+  "salesforce",
+  "semrush",
+  "sentry",
+  "sequenzy",
+  "shopify",
+  "slack",
+  "stripe",
+  "superside",
+  "tavily",
+  "typefully",
+  "vercel",
+  "webflow",
+  "zendesk",
+  "zernio",
+] as const;
+
+const EXPECTED_INSTALLABLE_IDS = [
+  "context",
+  "exa",
+  "executor",
+  "firecrawl",
+  "parallel-search",
+] as const;
 
 function manifest(id: string) {
   return parsePluginManifestJson(
@@ -107,14 +167,33 @@ describe("plugin catalog loader", () => {
     ]);
   });
 
-  it("migrates the five identities and working recipes", () => {
+  it("loads the complete directory with only the five verified recipes installable", () => {
+    const directory = loadDirectoryCatalog();
     const catalog = loadCatalog();
-    expect(catalog.map((plugin) => plugin.id)).toEqual(EXPECTED_IDS);
+    expect(directory.map((plugin) => plugin.id).toSorted()).toEqual(EXPECTED_DIRECTORY_IDS);
+    expect(new Set(directory.map((plugin) => plugin.id)).size).toBe(51);
+    expect(catalog.map((plugin) => plugin.id)).toEqual(EXPECTED_INSTALLABLE_IDS);
     expect(catalog.map((plugin) => `builtin-${plugin.id}`)).toEqual(
-      EXPECTED_IDS.map((id) => `builtin-${id}`),
+      EXPECTED_INSTALLABLE_IDS.map((id) => `builtin-${id}`),
     );
-    expect(catalog.map((plugin) => plugin.featuredRank)).toEqual([1, 2, 3, 4, 5]);
-    expect(catalog.map((plugin) => plugin.category)).toEqual(["Web", "Web", "Web", "Web", "Work"]);
+    expect(directory.filter(isInstallablePlugin).map((plugin) => plugin.id)).toEqual(
+      EXPECTED_INSTALLABLE_IDS,
+    );
+    expect(
+      directory
+        .filter((plugin) => plugin.featuredRank !== undefined)
+        .map((plugin) => ({ id: plugin.id, rank: plugin.featuredRank })),
+    ).toEqual([
+      { id: "context", rank: 1 },
+      { id: "zernio", rank: 2 },
+    ]);
+    expect(
+      new Set(
+        directory.flatMap((plugin) =>
+          plugin.featuredRank === undefined ? [] : [plugin.featuredRank],
+        ),
+      ).size,
+    ).toBe(2);
     expect(catalog.every((plugin) => plugin.logo.src.length > 0)).toBe(true);
 
     const byId = new Map(catalog.map((plugin) => [plugin.id, plugin]));
@@ -145,6 +224,73 @@ describe("plugin catalog loader", () => {
     });
   });
 
+  it("keeps every unverified entry pending with complete approval coverage", () => {
+    const pending = loadDirectoryCatalog().filter(
+      (plugin) => !EXPECTED_INSTALLABLE_IDS.some((id) => id === plugin.id),
+    );
+    expect(pending).toHaveLength(46);
+    expect(pending.filter((plugin) => plugin.catalogStatus === "approval-pending")).toHaveLength(
+      16,
+    );
+    expect(
+      pending.filter((plugin) => plugin.catalogStatus === "verification-pending"),
+    ).toHaveLength(30);
+    for (const plugin of pending) {
+      expect(["approval-pending", "verification-pending"]).toContain(plugin.catalogStatus);
+      expect(plugin.connection).toMatchObject({
+        type: plugin.catalogStatus,
+        blocker: expect.stringMatching(/\S/),
+      });
+      expect(isInstallablePlugin(plugin)).toBe(false);
+      expect(new Set(plugin.approvals)).toEqual(
+        new Set(
+          plugin.permissions.flatMap((permission) =>
+            permission.approval === "read" ? [] : [permission.approval],
+          ),
+        ),
+      );
+    }
+  });
+
+  it("keeps official vendor endpoints visible while their connection blockers remain", () => {
+    const byId = new Map(loadDirectoryCatalog().map((plugin) => [plugin.id, plugin]));
+    for (const [id, url, status] of [
+      ["github", "https://api.githubcopilot.com/mcp/", "verification-pending"],
+      ["hubspot", "https://mcp.hubspot.com", "approval-pending"],
+      ["vercel", "https://mcp.vercel.com", "approval-pending"],
+    ] as const) {
+      const plugin = byId.get(id);
+      expect(plugin).toMatchObject({
+        kind: "mcp-url",
+        url,
+        connection: { type: status, blocker: expect.stringMatching(/\S/) },
+      });
+      expect(plugin && isInstallablePlugin(plugin)).toBe(false);
+    }
+  });
+
+  it("keeps the key, local-loopback, and payment connectors pending", () => {
+    const byId = new Map(loadDirectoryCatalog().map((plugin) => [plugin.id, plugin]));
+    expect(byId.get("typefully")).toMatchObject({
+      authentication: "oauth",
+      requiredCredentials: [],
+      transport: { type: "url", url: "https://mcp.typefully.com/mcp" },
+      connection: { type: "verification-pending" },
+      catalogStatus: "verification-pending",
+    });
+    expect(byId.get("paper")).toMatchObject({
+      transport: { type: "url", url: "http://127.0.0.1:29979/mcp" },
+      connection: { type: "verification-pending" },
+      catalogStatus: "verification-pending",
+    });
+    expect(byId.get("paypal")).toMatchObject({
+      transport: { type: "url", url: "https://mcp.paypal.com/mcp" },
+      connection: { type: "verification-pending" },
+      approvals: expect.arrayContaining(["send", "pay", "production", "refunds"]),
+      catalogStatus: "verification-pending",
+    });
+  });
+
   it("rejects duplicate ids and mismatched isolated directories", () => {
     const context = manifest("context");
     const assets = {
@@ -169,6 +315,8 @@ describe("plugin catalog loader", () => {
 
   it("keeps removed builtins visible and Custom MCP independent", () => {
     const catalog = loadCatalog();
+    const exa = catalog.find((plugin) => plugin.id === "exa");
+    if (!exa) throw new TypeError("Exa is missing from the catalog.");
     expect(
       resolveCatalogInstallations(
         [
@@ -179,7 +327,7 @@ describe("plugin catalog loader", () => {
         catalog,
       ),
     ).toEqual([
-      { kind: "catalog", serverId: "builtin-exa", plugin: catalog[2] },
+      { kind: "catalog", serverId: "builtin-exa", plugin: exa },
       {
         kind: "legacy",
         serverId: "builtin-removed-vendor",
@@ -187,5 +335,17 @@ describe("plugin catalog loader", () => {
         title: "Removed Vendor",
       },
     ]);
+  });
+
+  it("states blockers and setup as vendor or lifecycle facts, not as host work", () => {
+    const hostActor = /\bAkeru\b/;
+    for (const plugin of loadDirectoryCatalog()) {
+      if (plugin.connection.type === "approval-pending") {
+        expect(plugin.connection.blocker).not.toMatch(hostActor);
+      }
+      for (const step of plugin.setup) {
+        expect(step).not.toMatch(/\bAkeru (?:has|must|needs|completes|to)\b/);
+      }
+    }
   });
 });
