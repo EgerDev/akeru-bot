@@ -55,4 +55,20 @@ describe("BotUsageCap", () => {
       ).toBe(sandbox);
     }
   });
+
+  it.each(["e2b", "daytona"])("rejects the unsupported %s sandbox", (sandbox) => {
+    expect(() =>
+      decodeCreated({
+        botId: "bot-sandbox",
+        name: "Sandbox bot",
+        title: "Generalist",
+        avatar: { kind: "blob", shape: "circle", color: "#5B7FD4" },
+        engine: null,
+        sandbox,
+        groupId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toThrow();
+  });
 });
