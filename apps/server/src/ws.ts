@@ -1986,6 +1986,22 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.subscriptionAuthList, getAccessHealthSnapshot(), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.botInboxList]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.botInboxList,
+            getAccessHealthSnapshot().pipe(
+              Effect.map(({ inbox }) => inbox.filter((item) => item.status === "open")),
+            ),
+            { "rpc.aggregate": "bot" },
+          ),
+        [WS_METHODS.botInboxResolve]: ({ id }) =>
+          observeRpcEffect(
+            WS_METHODS.botInboxResolve,
+            Effect.sync(() => {
+              botInbox.resolveById(id);
+            }),
+            { "rpc.aggregate": "bot" },
+          ),
         [WS_METHODS.subscriptionAuthStart]: ({ provider }) =>
           observeRpcEffect(
             WS_METHODS.subscriptionAuthStart,

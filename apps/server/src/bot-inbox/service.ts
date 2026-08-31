@@ -28,6 +28,7 @@ export interface BotInboxItem {
   readonly firstSeenAt: string;
   readonly lastSeenAt: string;
   readonly resolvedAt?: string;
+  readonly acknowledgedAt?: string;
   readonly occurrenceCount: number;
 }
 
@@ -102,9 +103,14 @@ export class BotInboxService {
 
   ensureOpen(incident: BotInboxIncident): BotInboxItem {
     this.reload();
-    const existingIndex = this.items.findIndex(
+    let existingIndex = this.items.findIndex(
       (item) => item.incidentKey === incident.incidentKey && item.status === "open",
     );
+    if (existingIndex < 0) {
+      existingIndex = this.items.findLastIndex(
+        (item) => item.incidentKey === incident.incidentKey && item.acknowledgedAt !== undefined,
+      );
+    }
     if (existingIndex < 0) return this.upsert(incident);
 
     const existing = this.items[existingIndex]!;
@@ -134,9 +140,39 @@ export class BotInboxService {
     const resolvedAt = this.now();
     let changed = false;
     this.items = this.items.map((item) => {
-      if (item.incidentKey !== incidentKey || item.status === "resolved") return item;
+      if (
+        item.incidentKey !== incidentKey ||
+        (item.status === "resolved" && item.acknowledgedAt === undefined)
+      ) {
+        return item;
+      }
       changed = true;
-      return { ...item, status: "resolved", resolvedAt, lastSeenAt: resolvedAt };
+      const { acknowledgedAt: _acknowledgedAt, ...resolvedItem } = item;
+      return {
+        ...resolvedItem,
+        status: "resolved",
+        resolvedAt,
+        lastSeenAt: resolvedAt,
+      };
+    });
+    if (changed) this.save();
+    return changed;
+  }
+
+  resolveById(id: string): boolean {
+    this.reload();
+    const resolvedAt = this.now();
+    let changed = false;
+    this.items = this.items.map((item) => {
+      if (item.id !== id || item.status === "resolved") return item;
+      changed = true;
+      return {
+        ...item,
+        status: "resolved",
+        resolvedAt,
+        lastSeenAt: resolvedAt,
+        acknowledgedAt: resolvedAt,
+      };
     });
     if (changed) this.save();
     return changed;
