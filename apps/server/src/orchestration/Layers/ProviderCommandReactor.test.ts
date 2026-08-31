@@ -69,6 +69,7 @@ import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
+import { BotUsageLedger, BotUsageLedgerLive } from "../../usage/BotUsageLedger.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -110,7 +111,7 @@ describe("ProviderCommandReactor", () => {
     );
   });
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderCommandReactor | ProjectionSnapshotQuery,
+    OrchestrationEngineService | ProviderCommandReactor | ProjectionSnapshotQuery | BotUsageLedger,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -173,6 +174,8 @@ describe("ProviderCommandReactor", () => {
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
     readonly botEngine?: { readonly provider: string; readonly model: string } | null;
+    readonly botUsageCap?: { readonly unit: "tokens"; readonly limit: number } | null;
+    readonly bindTurnFailure?: boolean;
     readonly unavailableEngine?: boolean;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
@@ -442,10 +445,20 @@ describe("ProviderCommandReactor", () => {
         } satisfies OrchestrationEngineService["Service"];
       }),
     ).pipe(Layer.provide(orchestrationLayer));
+    const botUsageLedgerLayer = Layer.effect(
+      BotUsageLedger,
+      BotUsageLedger.pipe(
+        Effect.map((ledger) => ({
+          ...ledger,
+          bindTurn: input?.bindTurnFailure ? () => Effect.die("bind failed") : ledger.bindTurn,
+        })),
+      ),
+    ).pipe(Layer.provide(BotUsageLedgerLive.pipe(Layer.provide(SqlitePersistenceMemory))));
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(reactorOrchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(ProjectionBotRepositoryLive.pipe(Layer.provide(SqlitePersistenceMemory))),
+      Layer.provideMerge(botUsageLedgerLayer),
       Layer.provideMerge(Layer.succeed(AgentController, service)),
       Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
       Layer.provideMerge(
@@ -504,7 +517,7 @@ describe("ProviderCommandReactor", () => {
           engine: input.botEngine,
           sandbox: "local",
           runtimeMode: "approval-required",
-          usageCap: null,
+          usageCap: input.botUsageCap ?? null,
           groupId: null,
           createdAt: now,
         }),
@@ -586,6 +599,10 @@ describe("ProviderCommandReactor", () => {
       stateDir,
       drain,
       runEffect,
+      summarizeBotUsage: () =>
+        runtime!.runPromise(
+          BotUsageLedger.pipe(Effect.flatMap((ledger) => ledger.summarize(BotId.make("bot-1")))),
+        ),
       get titleRegenerationCompletionDispatchAttempts() {
         return titleRegenerationCompletionDispatchAttempts;
       },
@@ -686,6 +703,162 @@ describe("ProviderCommandReactor", () => {
       botSandbox: "local",
     });
   });
+
+  effectIt.effect("reserves a configured bot's usage cap and binds the provider turn", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          botEngine: { provider: "codex", model: "gpt-5-codex" },
+          botUsageCap: { unit: "tokens", limit: 1_000 },
+        }),
+      );
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-metered-bot"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-metered-bot"),
+          role: "user",
+          text: "meter this turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      yield* Effect.promise(() =>
+        waitFor(async () => (await harness.summarizeBotUsage()).entries[0]?.turnId === "turn-1"),
+      );
+      const usage = yield* Effect.promise(() => harness.summarizeBotUsage());
+      expect(usage.reservedTokens).toBe(1_000);
+      expect(usage.entries).toContainEqual(
+        expect.objectContaining({
+          botId: "bot-1",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          state: "reserved",
+          reservedTokens: 1_000,
+        }),
+      );
+    }),
+  );
+
+  effectIt.effect("rejects a new turn after a configured bot reserves its full usage cap", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          botEngine: { provider: "codex", model: "gpt-5-codex" },
+          botUsageCap: { unit: "tokens", limit: 1_000 },
+        }),
+      );
+      const dispatchTurn = (suffix: string) =>
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-turn-start-cap-${suffix}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId(`user-message-cap-${suffix}`),
+            role: "user" as const,
+            text: suffix,
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required" as const,
+          createdAt: `2026-01-01T00:00:0${suffix === "first" ? "0" : "1"}.000Z`,
+        });
+
+      yield* dispatchTurn("first");
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      yield* dispatchTurn("second");
+      yield* Effect.promise(() => harness.drain());
+
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+      const readModel = yield* Effect.promise(() => harness.readModel());
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      expect(thread?.activities).toContainEqual(
+        expect.objectContaining({
+          kind: "provider.turn.start.failed",
+          payload: expect.objectContaining({
+            detail: "Bot bot-1 reached its 1000-token usage cap.",
+            requestId: "user-message-cap-second",
+          }),
+        }),
+      );
+    }),
+  );
+
+  effectIt.effect("releases a configured bot's usage reservation when dispatch fails", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          botEngine: { provider: "codex", model: "gpt-5-codex" },
+          botUsageCap: { unit: "tokens", limit: 1_000 },
+        }),
+      );
+      harness.sendTurn.mockImplementation(() => Effect.die("dispatch failed"));
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-dispatch-failure"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-dispatch-failure"),
+          role: "user",
+          text: "fail dispatch",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+
+      const usage = yield* Effect.promise(() => harness.summarizeBotUsage());
+      expect(usage.consumedTokens).toBe(0);
+      expect(usage.reservedTokens).toBe(0);
+      expect(usage.entries[0]?.state).toBe("released");
+    }),
+  );
+
+  effectIt.effect("charges a configured bot's usage reservation when turn binding fails", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          botEngine: { provider: "codex", model: "gpt-5-codex" },
+          botUsageCap: { unit: "tokens", limit: 1_000 },
+          bindTurnFailure: true,
+        }),
+      );
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-bind-failure"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-bind-failure"),
+          role: "user",
+          text: "fail binding",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* Effect.promise(() => harness.drain());
+
+      const usage = yield* Effect.promise(() => harness.summarizeBotUsage());
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+      expect(usage.consumedTokens).toBe(1_000);
+      expect(usage.reservedTokens).toBe(0);
+      expect(usage.entries[0]).toMatchObject({
+        state: "unavailable",
+        unavailableReason: "Usage reservation could not bind to the provider turn.",
+      });
+    }),
+  );
 
   it("projects a typed failure when the configured bot engine is unavailable", async () => {
     const harness = await createHarness({

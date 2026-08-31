@@ -52,6 +52,8 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
 import { ServerConfig } from "../../config.ts";
 import { BotInboxService } from "../../bot-inbox/service.ts";
+import { BotUsageLedger } from "../../usage/BotUsageLedger.ts";
+import { resolveControllerBotId } from "./ProviderCommandReactor.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -914,6 +916,7 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const agentController = yield* AgentController;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
+  const botUsageLedger = yield* BotUsageLedger;
   const serverSettingsService = yield* ServerSettingsService;
   const serverConfig = yield* ServerConfig;
   const botInbox = BotInboxService.forSecretsDir(serverConfig.secretsDir);
@@ -1562,15 +1565,81 @@ const make = Effect.gen(function* () {
 
       const now = event.createdAt;
       const eventTurnId = toTurnId(event.turnId);
+      const respondingBotId = resolveControllerBotId(thread);
       const activeTurnId = thread.session?.activeTurnId ?? null;
+      const conflictsWithActiveTurn =
+        activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
       const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
         threadId: thread.id,
       });
+      const expectedPendingTurnId = Option.isSome(pendingTurnStart)
+        ? yield* getExpectedProviderTurnIdForThread(thread.id)
+        : undefined;
+      const eventMatchesPendingTurn =
+        Option.isSome(pendingTurnStart) && sameId(expectedPendingTurnId, eventTurnId);
+      const canReconcileUsage =
+        !conflictsWithActiveTurn &&
+        (activeTurnId !== null || Option.isNone(pendingTurnStart) || eventMatchesPendingTurn);
+      if (
+        respondingBotId !== null &&
+        eventTurnId !== undefined &&
+        canReconcileUsage &&
+        event.type === "thread.token-usage.updated"
+      ) {
+        const usage = event.payload.usage;
+        const outputTokens = usage.lastOutputTokens ?? usage.outputTokens ?? 0;
+        yield* botUsageLedger
+          .settleForTurn({
+            botId: respondingBotId,
+            threadId: thread.id,
+            turnId: eventTurnId,
+            state: "reported",
+            inputTokens:
+              usage.lastInputTokens ??
+              usage.inputTokens ??
+              Math.max(0, (usage.lastUsedTokens ?? usage.usedTokens) - outputTokens),
+            outputTokens,
+            reasoningTokens: usage.lastReasoningOutputTokens ?? usage.reasoningOutputTokens ?? null,
+            settledAt: now,
+          })
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("provider runtime ingestion failed to record bot usage", {
+                eventId: event.eventId,
+                threadId: thread.id,
+                turnId: eventTurnId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+      }
+      if (
+        respondingBotId !== null &&
+        eventTurnId !== undefined &&
+        canReconcileUsage &&
+        (event.type === "turn.completed" || event.type === "turn.aborted")
+      ) {
+        yield* botUsageLedger
+          .finalizeForTurn({
+            botId: respondingBotId,
+            threadId: thread.id,
+            turnId: eventTurnId,
+            settledAt: now,
+          })
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("provider runtime ingestion failed to finalize bot usage", {
+                eventId: event.eventId,
+                threadId: thread.id,
+                turnId: eventTurnId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+      }
       const hasPendingTurnStart =
         Option.isSome(pendingTurnStart) && thread.session?.status === "starting";
 
-      const conflictsWithActiveTurn =
-        activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
       const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined;
 
       // A turn.started that conflicts with the active turn is legitimate when
@@ -1580,10 +1649,7 @@ const make = Effect.gen(function* () {
       // new turn without ever completing the superseded one. A stale
       // turn.started for some other turn id still gets rejected.
       const conflictingTurnStartIsPendingTurnStart =
-        event.type === "turn.started" && conflictsWithActiveTurn
-          ? sameId(yield* getExpectedProviderTurnIdForThread(thread.id), eventTurnId) &&
-            Option.isSome(pendingTurnStart)
-          : false;
+        event.type === "turn.started" && conflictsWithActiveTurn ? eventMatchesPendingTurn : false;
 
       const shouldApplyThreadLifecycle = (() => {
         if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
@@ -1604,6 +1670,9 @@ const make = Effect.gen(function* () {
             // Only the active turn may close the lifecycle state.
             if (activeTurnId !== null && eventTurnId !== undefined) {
               return sameId(activeTurnId, eventTurnId);
+            }
+            if (Option.isSome(pendingTurnStart)) {
+              return eventMatchesPendingTurn;
             }
             // No active turn tracked: accept only completions that name their
             // turn (covers a real completion whose turn.started was lost). An
