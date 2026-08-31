@@ -1138,6 +1138,28 @@ const make = (options?: AgentControllerLiveOptions) =>
     );
 
     return AgentController.of({
+      readConversationMemory: (threadId) =>
+        bundle.readObservationalMemory
+          ? runMastra("memory.read", () =>
+              bundle.readObservationalMemory!(String(threadId), String(threadId)),
+            )
+          : Effect.fail(
+              new AgentControllerRuntimeError({
+                operation: "memory.read",
+                detail: "Conversation memory is unavailable.",
+              }),
+            ),
+      clearConversationMemory: (threadId) =>
+        bundle.clearObservationalMemory
+          ? runMastra("memory.clear", () =>
+              bundle.clearObservationalMemory!(String(threadId), String(threadId)),
+            )
+          : Effect.fail(
+              new AgentControllerRuntimeError({
+                operation: "memory.clear",
+                detail: "Conversation memory is unavailable.",
+              }),
+            ),
       resolveEngine,
       inspectEngine,
       startSession,
