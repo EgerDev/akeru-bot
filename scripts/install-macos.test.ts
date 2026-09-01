@@ -31,3 +31,11 @@ it("documents the curl install path that skips browser quarantine", () => {
   expect(script).toContain("curl -fsSL https://www.akeru-bot.com/install | bash");
   expect(script).toContain("Safari and Chrome quarantine DMGs");
 });
+
+it("matches the existing agent install rules for /Applications", () => {
+  expect(script).toContain('dest_app="/Applications/${APP_NAME}"');
+  expect(script).toContain("with administrator privileges");
+  expect(script).toContain("xattr -d com.apple.quarantine");
+  expect(script).not.toContain("HOME/Applications");
+  expect(script).not.toContain("spctl --master-disable");
+});

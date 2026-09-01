@@ -17,7 +17,7 @@ die() { printf 'akeru: %s\n' "$*" >&2; exit 1; }
 [ "$(uname -s)" = Darwin ] || die "This installer is macOS-only."
 [ "$(uname -m)" = arm64 ] || die "Official releases support Apple silicon only."
 
-for cmd in curl hdiutil ditto shasum xattr open; do
+for cmd in curl hdiutil ditto shasum xattr open osascript; do
   command -v "$cmd" >/dev/null 2>&1 || die "Required command '$cmd' is missing."
 done
 
@@ -60,10 +60,16 @@ source_app="$mount_point/$APP_NAME"
 
 dest_app="/Applications/${APP_NAME}"
 if ! ditto "$source_app" "$dest_app" 2>/dev/null; then
-  mkdir -p "$HOME/Applications"
-  dest_app="$HOME/Applications/${APP_NAME}"
-  ditto "$source_app" "$dest_app"
+  log "Need administrator permission for /Applications."
+  osascript - "$source_app" "$dest_app" <<'APPLESCRIPT'
+on run argv
+  set src to item 1 of argv
+  set dest to item 2 of argv
+  do shell script "ditto " & quoted form of src & " " & quoted form of dest with administrator privileges
+end run
+APPLESCRIPT
 fi
+[ -d "$dest_app" ] || die "Could not install into /Applications."
 
 xattr -d com.apple.quarantine "$dest_app" >/dev/null 2>&1 || true
 log "Installed ${dest_app}"
