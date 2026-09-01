@@ -32,7 +32,7 @@ GitHub-hosted macOS, Windows, and Linux runners build the advertised desktop tar
 workflow creates the `vX.Y.Z` tag and GitHub Release. The final job verifies the exact asset names
 and `SHA256SUMS`. Missing signing credentials produce unsigned macOS and Windows artifacts.
 Unsigned macOS builds still replace Electron's linker-signed stub with a sealed ad-hoc signature
-and fail the release if `codesign --verify` reports `linker-signed` or `Identifier=Electron`.
+and fail the release if `codesign --verify` fails or the identifier is not `dev.leodoes.akeru`.
 Complete credentials use the existing Developer ID, notarization, and Azure Trusted Signing paths.
 
 See the [release smoke runbook](../operations/release.md) for the exact validation path.

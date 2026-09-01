@@ -19,13 +19,13 @@ import {
     <div class="install-dialog-copy">
       <h2 id="install-prompt-title">{MAC_DOWNLOAD_DIALOG_TITLE}</h2>
       <p id="install-prompt-description">{MAC_DOWNLOAD_DIALOG_BODY}</p>
-      <pre id="install-prompt-command"><code>{MAC_CURL_INSTALL_COMMAND}</code></pre>
+      <pre><code>{MAC_CURL_INSTALL_COMMAND}</code></pre>
     </div>
     <div class="install-dialog-actions">
       <button class="install-dialog-action" type="button" data-copy-install-prompt>
         Copy install command
       </button>
-      <button class="install-dialog-secondary" type="button" data-copy-agent-prompt>
+      <button class="install-dialog-action secondary" type="button" data-copy-agent-prompt>
         Copy agent prompt
       </button>
     </div>
@@ -192,28 +192,19 @@ import {
     cursor: pointer;
   }
 
-  .install-dialog-action:hover,
-  .install-dialog-secondary:hover {
+  .install-dialog-action:hover {
     opacity: 0.9;
   }
 
-  .install-dialog-secondary {
-    width: 100%;
-    min-height: 44px;
-    padding: 0 18px;
+  .install-dialog-action.secondary {
     color: var(--color-foreground);
-    font: inherit;
-    font-size: 14px;
     font-weight: 560;
     background: transparent;
-    border: 1px solid var(--color-border);
-    border-radius: 11px;
-    cursor: pointer;
+    border-color: var(--color-border);
   }
 
   .install-dialog-close:focus-visible,
-  .install-dialog-action:focus-visible,
-  .install-dialog-secondary:focus-visible {
+  .install-dialog-action:focus-visible {
     outline: 2px solid var(--color-primary);
     outline-offset: 2px;
   }

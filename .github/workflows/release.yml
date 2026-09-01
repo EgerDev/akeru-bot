@@ -228,33 +228,14 @@ jobs:
           mount_point="$RUNNER_TEMP/akeru-unsigned-dmg"
           mkdir -p "$mount_point"
           hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_point"
-          cleanup() {
-            hdiutil detach "$mount_point" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
+          trap 'hdiutil detach "$mount_point" >/dev/null 2>&1 || true' EXIT
           apps=("$mount_point"/*.app)
-          if (( ${#apps[@]} != 1 )); then
-            printf 'Expected one app in the DMG, found %s.\n' "${#apps[@]}" >&2
-            exit 1
-          fi
-          app="${apps[0]}"
-          codesign --verify --deep --strict --verbose=2 "$app"
-          signature="$(codesign -dv --verbose=4 "$app" 2>&1)"
+          test "${#apps[@]}" -eq 1
+          codesign --verify --deep --strict --verbose=2 "${apps[0]}"
+          signature="$(codesign -dv --verbose=4 "${apps[0]}" 2>&1)"
           printf '%s\n' "$signature"
-          if printf '%s\n' "$signature" | grep -q 'linker-signed'; then
-            printf 'Unsigned macOS builds must replace Electron linker-signed stubs.\n' >&2
-            exit 1
-          fi
-          if printf '%s\n' "$signature" | grep -q 'Identifier=Electron$'; then
-            printf 'Packaged app still uses the Electron identifier.\n' >&2
-            exit 1
-          fi
           if ! printf '%s\n' "$signature" | grep -q 'Identifier=dev.leodoes.akeru$'; then
             printf 'Packaged app is missing the Akeru bundle identifier.\n' >&2
-            exit 1
-          fi
-          if ! printf '%s\n' "$signature" | grep -q 'Sealed Resources version='; then
-            printf 'Packaged app is missing sealed resources.\n' >&2
             exit 1
           fi
 

@@ -1844,12 +1844,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           schemes: ["akeru", "akeru-dev", "t3code", "t3code-dev"],
         },
       ],
-      // Skipping codesign leaves Electron's linker-signed stub
-      // (Identifier=Electron, no sealed resources). Gatekeeper then reports the
-      // downloaded DMG as damaged. Unsigned builds opt into a sealed ad-hoc
-      // signature; Developer ID builds keep using CSC_NAME and notarize.
-      hardenedRuntime: true,
-      gatekeeperAssess: false,
+      // Unsigned builds opt into identity "-" so electron-builder replaces
+      // Electron's linker-signed stub. Developer ID builds use CSC_NAME.
       notarize: signed,
       sign: path.join(repoRoot, "scripts/sign-macos.ts"),
       ...(signed ? {} : { identity: "-" }),

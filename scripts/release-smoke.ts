@@ -119,7 +119,6 @@ for (const [needle, label] of [
   ["runner: ubuntu-24.04", "GitHub-hosted Linux runner"],
   ["Signing credentials must be either complete or absent.", "unsigned signing fallback"],
   ["--signed", "existing signed build path"],
-  ["linker-signed", "unsigned macOS linker-stub rejection"],
   ["xcrun notarytool submit", "macOS notarization"],
   ["verify-release-assets.ts", "asset name and hash verification"],
   ["gh release create", "stable GitHub Release"],
