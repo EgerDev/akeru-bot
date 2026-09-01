@@ -104,6 +104,7 @@ interface ActiveTurn {
   readonly assistantMessages: Map<string, ActiveAssistantMessage>;
   waiting: boolean;
   finished: boolean;
+  memoryQueued: boolean;
 }
 
 interface ActiveSession {
@@ -347,6 +348,7 @@ const make = (options?: AgentControllerLiveOptions) =>
       makeMastraHarness({
         authStorage,
         getKimiAccess: () => subscriptionAuth.getKimiForCodingAccess(),
+        memoryDbPath: NodePath.join(config.stateDir, "mastra-observational-memory.sqlite"),
         syncThreadToolApproval: async (threadId, toolName, protectedAction) => {
           const active = sessions.get(threadId);
           if (!active || (!protectedAction && !active.connectorSessionApprovals.has(toolName))) {
@@ -365,6 +367,28 @@ const make = (options?: AgentControllerLiveOptions) =>
 
     const publish = (event: ProviderRuntimeEvent) => {
       PubSub.publishUnsafe(runtimeEvents, event);
+    };
+
+    const queueTurnMemory = (threadId: ThreadId, active: ActiveSession, turn: ActiveTurn) => {
+      const resolved = resolvedByThread.get(String(threadId));
+      if (turn.memoryQueued || !bundle.observeAfterTurn || !resolved) return;
+      turn.memoryQueued = true;
+      void bundle
+        .observeAfterTurn({
+          threadId: String(threadId),
+          resourceId: String(threadId),
+          modelId: resolved.mastraModelId,
+        })
+        .catch((cause) => {
+          turn.memoryQueued = false;
+          Effect.runFork(
+            Effect.logWarning("Akeru background observational memory failed.", {
+              threadId,
+              turnId: turn.turnId,
+              cause,
+            }),
+          );
+        });
     };
 
     const baseEvent = (
@@ -426,6 +450,7 @@ const make = (options?: AgentControllerLiveOptions) =>
     ) => {
       const turn = active.activeTurn;
       if (!turn || turn.finished) return;
+      queueTurnMemory(threadId, active, turn);
       turn.finished = true;
       completeAssistantMessages(threadId, active, turn);
       publish({
@@ -1001,6 +1026,7 @@ const make = (options?: AgentControllerLiveOptions) =>
           assistantMessages: new Map(),
           waiting: false,
           finished: false,
+          memoryQueued: false,
         };
         active.status = "running";
         publish({
@@ -1201,7 +1227,9 @@ const make = (options?: AgentControllerLiveOptions) =>
         yield* runMastra("destroy", () => bundle.controller.destroy()).pipe(
           Effect.ignoreCause({ log: true }),
         );
-        bundle.destroy();
+        yield* runMastra("bundle.destroy", async () => bundle.destroy()).pipe(
+          Effect.ignoreCause({ log: true }),
+        );
       }),
     );
 
