@@ -1513,6 +1513,8 @@ const make = (options?: AgentControllerLiveOptions) =>
           : {}),
         ...(input.botId && channelRuntime
           ? {
+              reactToMessage: (request, toolCallId) =>
+                channelRuntime!.react(threadId, input.botId!, request, toolCallId),
               channels: {
                 create: (request) => channelRuntime!.create(input.botId!, request),
                 update: (request) => channelRuntime!.update(input.botId!, request),

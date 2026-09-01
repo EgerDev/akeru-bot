@@ -6,6 +6,7 @@ import {
   BotId,
   GroupId,
   IsoDateTime,
+  MessageId,
   NonNegativeInt,
   PositiveInt,
   ThreadId,
@@ -73,6 +74,7 @@ export const AkeruToolId = Schema.Literals([
   "SendToUser",
   "SearchPlugins",
   "GetPlugin",
+  "ReactToMessage",
   "InstallPlugin",
   "UninstallPlugin",
   "GetMcpServerStatus",
@@ -149,6 +151,11 @@ export const AkeruToolInputSchemas = {
     limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(50))),
   }),
   GetPlugin: Schema.Struct({ pluginId: TrimmedNonEmptyString }),
+  ReactToMessage: Schema.Struct({
+    messageId: MessageId,
+    emoji: TrimmedNonEmptyString.check(Schema.isMaxLength(32)),
+    action: Schema.Literals(["add", "remove"]),
+  }),
   InstallPlugin: Schema.Struct({ pluginId: TrimmedNonEmptyString }),
   UninstallPlugin: Schema.Struct({ pluginId: TrimmedNonEmptyString }),
   GetMcpServerStatus: McpServerIdInput,
@@ -160,6 +167,22 @@ export const AkeruToolInputSchemas = {
     serverIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
 } as const satisfies Record<AkeruToolId, Schema.Top>;
+
+export const AkeruMessageReactionResult = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("applied"),
+    messageId: MessageId,
+    emoji: TrimmedNonEmptyString,
+    action: Schema.Literals(["add", "remove"]),
+    changed: Schema.Boolean,
+  }),
+  Schema.Struct({
+    status: Schema.Literal("unsupported"),
+    messageId: MessageId,
+    reason: Schema.Literal("channel-does-not-support-reactions"),
+  }),
+]);
+export type AkeruMessageReactionResult = typeof AkeruMessageReactionResult.Type;
 
 const AkeruToolInputDecoders = Object.fromEntries(
   Object.entries(AkeruToolInputSchemas).map(([toolId, schema]) => [
@@ -297,6 +320,12 @@ export const AKERU_TOOL_CATALOG = [
     "GetPlugin",
     "bot-workspace",
     "Inspect a plugin, its connection, permissions, health, and dependents.",
+  ),
+  define(
+    "ReactToMessage",
+    "bot-workspace",
+    "Add or remove an emoji reaction on a visible message.",
+    { approval: "send" },
   ),
   define("InstallPlugin", "bot-workspace", "Install a curated plugin after inspecting it.", {
     approval: "production",
