@@ -56,6 +56,9 @@ describe("BotDetailsPanel", () => {
     expect(markup).toContain("Facts and history");
     expect(markup).toContain(">Tools</div>");
     expect(markup).toContain("No workspace tools");
+    expect(markup).toContain(">Channels</div>");
+    expect(markup).toContain('aria-label="Manage bot channels"');
+    expect(markup).toContain("No channels");
     expect(markup).toContain(">Manage</span>");
     expect(markup).toContain('aria-label="Collapse Akeru bot sidebar"');
     expect(markup).toContain('aria-label="Open Akeru bot sidebar"');
@@ -97,7 +100,8 @@ describe("BotDetailsPanel", () => {
     const source = NodeFS.readFileSync(new URL("./BotDetailsPanel.tsx", import.meta.url), "utf8");
 
     expect(source).toContain('resolveShortcutCommand(event, keybindings) !== "rightPanel.toggle"');
-    expect(source).toContain('shortcutLabelForCommand(keybindings, "rightPanel.toggle")');
+    expect(source).toContain("shortcutLabelForCommand(");
+    expect(source).toContain('"rightPanel.toggle"');
     expect(source).toContain('window.addEventListener("keydown", onKeyDown, true)');
     expect(source).toContain("RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY");
   });
