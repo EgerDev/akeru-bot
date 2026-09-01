@@ -1745,10 +1745,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
               }
               for (const row of delegationRows) {
-                updatedAt = maxIso(
-                  updatedAt,
-                  row.delegation.completedAt ?? row.delegation.createdAt,
-                );
+                updatedAt = maxIso(updatedAt, row.delegation.updatedAt);
               }
               for (const mcpServer of mcpServers) {
                 updatedAt = maxIso(updatedAt, mcpServer.updatedAt);
@@ -2046,10 +2043,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 updatedAt = maxIso(updatedAt, row.updatedAt);
               }
               for (const row of delegationRows) {
-                updatedAt = maxIso(
-                  updatedAt,
-                  row.delegation.completedAt ?? row.delegation.createdAt,
-                );
+                updatedAt = maxIso(updatedAt, row.delegation.updatedAt);
               }
               for (const mcpServer of mcpServers) {
                 updatedAt = maxIso(updatedAt, mcpServer.updatedAt);
