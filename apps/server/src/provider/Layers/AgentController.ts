@@ -65,7 +65,11 @@ import {
 } from "../../memory/Services/MemoryCandidateRepository.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { AKERU_TURN_USAGE_RESERVATION_TOKENS, BotUsageLedger } from "../../usage/BotUsageLedger.ts";
+import { persistAkeruPreviewSnapshot } from "../AkeruPreviewSnapshotAttachment.ts";
 import {
   SubscriptionAuthService,
   type SubscriptionProviderId,
@@ -197,6 +201,8 @@ export interface AgentControllerLiveOptions {
   ) => Promise<AkeruBotWorkspace | Workspace>;
   readonly makeBotBrowser?: (input: CreateBotBrowserInput) => BotBrowser;
   readonly resolveComputerUseServer?: typeof resolveCodexComputerUseServer;
+  readonly issueMcpCredential?: typeof McpSessionRegistry.issueActiveMcpCredential;
+  readonly revokeMcpCredential?: typeof McpSessionRegistry.revokeActiveMcpThread;
   readonly entityMemoryRepository?: EntityMemoryRepositoryShape;
   readonly memoryCandidateRepository?: MemoryCandidateRepositoryShape;
   readonly delegationRuntime?: Pick<
@@ -428,6 +434,8 @@ const make = (options?: AgentControllerLiveOptions) =>
     const hostPlatform = yield* HostProcessPlatform;
     const legacyProviderBridge = yield* LegacyProviderBridge;
     const botUsageLedger = yield* BotUsageLedger;
+    const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+    const mcpSessionRegistry = yield* Effect.serviceOption(McpSessionRegistry.McpSessionRegistry);
     const runtimeContext = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(runtimeContext);
     const mutationLock = yield* Semaphore.make(1);
@@ -440,6 +448,41 @@ const make = (options?: AgentControllerLiveOptions) =>
       string,
       { readonly botId: BotId; readonly capLimit: number; turnId: TurnId }
     >();
+    const issueMcpCredential =
+      options?.issueMcpCredential ??
+      (Option.isSome(mcpSessionRegistry)
+        ? (request: McpSessionRegistry.McpCredentialRequest) =>
+            mcpSessionRegistry.value.revokeThread(request.threadId).pipe(
+              Effect.andThen(mcpSessionRegistry.value.issue(request)),
+              Effect.map((credential) => ({ config: credential.config })),
+            )
+        : McpSessionRegistry.issueActiveMcpCredential);
+    const revokeMcpCredential =
+      options?.revokeMcpCredential ??
+      (Option.isSome(mcpSessionRegistry)
+        ? mcpSessionRegistry.value.revokeThread
+        : McpSessionRegistry.revokeActiveMcpThread);
+    const clearPreviewMcpSession = (threadId: ThreadId) =>
+      revokeMcpCredential(threadId).pipe(
+        Effect.tap(() => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
+      );
+    const preparePreviewMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
+      Effect.gen(function* () {
+        const enabled = Option.isSome(serverSettings)
+          ? yield* serverSettings.value.getSettings.pipe(
+              Effect.map((settings) => settings.enableAgentBrowserAccess),
+              Effect.orElseSucceed(() => false),
+            )
+          : true;
+        if (!enabled) {
+          yield* clearPreviewMcpSession(threadId);
+          return;
+        }
+        const credential = yield* issueMcpCredential({ threadId, providerInstanceId });
+        if (credential) {
+          yield* Effect.sync(() => McpProviderSession.setMcpProviderSession(credential.config));
+        }
+      });
     let channelRuntime: AkeruChannelRuntime | undefined;
     let pluginRuntime: ReturnType<typeof createAkeruPluginRuntime> | undefined;
     let pluginRuntimeOptions: AkeruPluginRuntimeOptions | undefined;
@@ -480,6 +523,15 @@ const make = (options?: AgentControllerLiveOptions) =>
     const sessionResources = new AkeruSessionResources({
       stateDir: config.stateDir,
       hostPlatform,
+      getPreviewMcpServerConfig: (threadId) => {
+        const session = McpProviderSession.readMcpProviderSession(ThreadId.make(threadId));
+        return session
+          ? {
+              url: session.endpoint,
+              headers: { Authorization: session.authorizationHeader },
+            }
+          : undefined;
+      },
       toMcpServerConfigs,
       onMcpServerConnectionFailure: (serverId) =>
         subscriptionAuth.recordMcpRequestFailure(serverId, "The MCP server failed to connect."),
@@ -1053,6 +1105,14 @@ const make = (options?: AgentControllerLiveOptions) =>
         case "tool_end": {
           if (!turn) return;
           const toolName = active.toolNames.get(event.toolCallId) ?? "tool";
+          const previewSnapshot =
+            toolName === "preview_snapshot" && !event.isError && !event.denied
+              ? persistAkeruPreviewSnapshot({
+                  attachmentsDir: config.attachmentsDir,
+                  threadId: String(threadId),
+                  result: event.result,
+                })
+              : null;
           active.approvalRequests.delete(event.toolCallId);
           active.toolNames.delete(event.toolCallId);
           const mcpServerId = mcpServerIdForToolName(active.mcpServerIds, toolName);
@@ -1083,7 +1143,12 @@ const make = (options?: AgentControllerLiveOptions) =>
               title: isCodexComputerUseTool(toolName) ? "Computer Use" : toolName,
               data: isCodexComputerUseTool(toolName)
                 ? { action: "computer-use" }
-                : { result: event.result },
+                : {
+                    result: previewSnapshot?.activityResult ?? event.result,
+                    ...(previewSnapshot?.attachment
+                      ? { chatAttachment: previewSnapshot.attachment }
+                      : {}),
+                  },
             },
           });
           return;
@@ -1454,6 +1519,9 @@ const make = (options?: AgentControllerLiveOptions) =>
           detail: `Provider '${resolved.provider}' cannot enforce delegated access.`,
         });
       }
+      if (usesMastraCode(resolved.provider) && !(delegatedAccess && access.sandbox === null)) {
+        yield* preparePreviewMcpSession(threadId, resolved.providerInstanceId);
+      }
       const resources =
         delegatedAccess && access.sandbox === null
           ? ({ workspaceType: "none" } as const)
@@ -1474,7 +1542,7 @@ const make = (options?: AgentControllerLiveOptions) =>
                   : {}),
                 mcpServers,
               }),
-            );
+            ).pipe(Effect.onError(() => clearPreviewMcpSession(threadId)));
       if (!usesMastraCode(resolved.provider)) {
         return yield* legacyProviderBridge.startSession(threadId, input).pipe(
           Effect.tap((session) =>
@@ -1923,6 +1991,7 @@ const make = (options?: AgentControllerLiveOptions) =>
           yield* runMastra("resources.release", () =>
             sessionResources.release(key, { destroy: destroyResources }),
           ).pipe(Effect.ignoreCause({ log: true }));
+          yield* clearPreviewMcpSession(input.threadId);
           toolRuntime.unregisterSession(key);
           return;
         }
@@ -1945,6 +2014,7 @@ const make = (options?: AgentControllerLiveOptions) =>
             yield* runMastra("resources.release", () =>
               sessionResources.release(key, { destroy: destroyResources }),
             ).pipe(Effect.ignoreCause({ log: true }));
+            yield* clearPreviewMcpSession(input.threadId);
             toolRuntime.unregisterSession(key);
             sessions.delete(key);
             memoryUsageByThread.delete(key);
@@ -1984,6 +2054,7 @@ const make = (options?: AgentControllerLiveOptions) =>
           yield* runMastra("deleteSession", () =>
             bundle.controller.deleteSession({ resourceId: threadId }),
           ).pipe(Effect.ignoreCause({ log: true }));
+          yield* clearPreviewMcpSession(ThreadId.make(threadId));
           toolRuntime.unregisterSession(threadId);
         }
         legacyResourceIdentity.clear();
