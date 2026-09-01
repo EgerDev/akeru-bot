@@ -1,4 +1,4 @@
-import { getPairingTokenFromUrl } from "./pairingUrl";
+import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "./pairingUrl";
 
 const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
 
@@ -8,19 +8,12 @@ export interface HostedPairingRequest {
   readonly label: string;
 }
 
-export type HostedAppChannel = "latest" | "nightly";
-
 export function configuredHostedAppUrl(): string {
   return import.meta.env.VITE_HOSTED_APP_URL?.trim() || DEFAULT_HOSTED_APP_URL;
 }
 
 function configuredBackendUrl(): string {
   return import.meta.env.VITE_HTTP_URL?.trim() || import.meta.env.VITE_WS_URL?.trim() || "";
-}
-
-function configuredHostedAppChannel(): HostedAppChannel | null {
-  const channel = import.meta.env.VITE_HOSTED_APP_CHANNEL?.trim().toLowerCase();
-  return channel === "latest" || channel === "nightly" ? channel : null;
 }
 
 function originFromUrl(value: string): string | null {
@@ -34,10 +27,6 @@ function originFromUrl(value: string): string | null {
 export function isHostedStaticApp(url: URL = new URL(window.location.href)): boolean {
   if (configuredBackendUrl()) {
     return false;
-  }
-
-  if (configuredHostedAppChannel()) {
-    return true;
   }
 
   const hostedOrigin = originFromUrl(configuredHostedAppUrl());
@@ -64,10 +53,18 @@ export function hasHostedPairingRequest(url: URL = new URL(window.location.href)
   return readHostedPairingRequest(url) !== null;
 }
 
-export function buildHostedChannelSelectionUrl(input: {
-  readonly channel: HostedAppChannel;
+export function buildHostedPairingUrl(input: {
+  readonly host: string;
+  readonly token: string;
+  readonly label?: string | null;
 }): string {
-  const url = new URL("/__t3code/channel", configuredHostedAppUrl());
-  url.searchParams.set("channel", input.channel);
-  return url.toString();
+  const url = new URL("/pair", configuredHostedAppUrl());
+  url.searchParams.set("host", input.host);
+
+  const label = input.label?.trim();
+  if (label) {
+    url.searchParams.set("label", label);
+  }
+
+  return setPairingTokenOnUrl(url, input.token).toString();
 }

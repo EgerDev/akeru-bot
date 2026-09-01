@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  buildHostedChannelSelectionUrl,
+  buildHostedPairingUrl,
   hasHostedPairingRequest,
   isHostedStaticApp,
   readHostedPairingRequest,
@@ -23,19 +23,23 @@ describe("hostedPairing", () => {
     expect(hasHostedPairingRequest(url)).toBe(true);
   });
 
-  it("builds hosted channel selection URLs through the configured router origin", () => {
-    vi.stubEnv("VITE_HOSTED_APP_URL", "https://app.t3.codes");
+  it("prefers hash tokens so generated hosted links do not put credentials in search params", () => {
+    vi.stubEnv("VITE_HOSTED_APP_URL", "https://preview.t3.codes");
 
     const url = new URL(
-      buildHostedChannelSelectionUrl({
-        channel: "nightly",
+      buildHostedPairingUrl({
+        host: "https://backend.example.com:3773",
+        token: "pairing-token",
+        label: "Workstation",
       }),
     );
 
-    expect(url.origin).toBe("https://app.t3.codes");
-    expect(url.pathname).toBe("/__t3code/channel");
-    expect(url.searchParams.get("channel")).toBe("nightly");
-    expect(url.searchParams.has("next")).toBe(false);
+    expect(url.origin).toBe("https://preview.t3.codes");
+    expect(url.pathname).toBe("/pair");
+    expect(url.searchParams.get("host")).toBe("https://backend.example.com:3773");
+    expect(url.searchParams.get("label")).toBe("Workstation");
+    expect(url.searchParams.has("token")).toBe(false);
+    expect(url.hash).toBe("#token=pairing-token");
   });
 
   it("ignores incomplete hosted pairing requests", () => {
@@ -58,17 +62,5 @@ describe("hostedPairing", () => {
 
     vi.stubEnv("VITE_HTTP_URL", "https://backend.example.com");
     expect(isHostedStaticApp(new URL("https://preview.t3.codes/"))).toBe(false);
-  });
-
-  it("detects hosted channel aliases as static apps", () => {
-    vi.stubEnv("VITE_HOSTED_APP_URL", "https://app.t3.codes");
-    vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "nightly");
-    vi.stubEnv("VITE_HTTP_URL", "");
-    vi.stubEnv("VITE_WS_URL", "");
-
-    expect(isHostedStaticApp(new URL("https://nightly.app.t3.codes/"))).toBe(true);
-
-    vi.stubEnv("VITE_HTTP_URL", "https://backend.example.com");
-    expect(isHostedStaticApp(new URL("https://nightly.app.t3.codes/"))).toBe(false);
   });
 });

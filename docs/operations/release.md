@@ -5,7 +5,7 @@
 
 > For Akeru Bot maintainers.
 
-`.depot/workflows/release.yml` validates release inputs without publishing or releasing anything.
+`.depot/workflows/release-smoke.yml` validates release inputs without publishing or releasing anything.
 Dispatch it from Depot with a version such as `0.0.0-smoke.0`.
 
 ## What it checks
@@ -59,7 +59,7 @@ Run the focused checks before using the manual workflow:
 ```sh
 vp install --frozen-lockfile
 vp run check:public-dependencies
-vp test run scripts/check-public-dependencies.test.ts scripts/resolve-nightly-release.test.ts
+vp test run scripts/check-public-dependencies.test.ts scripts/resolve-previous-release-tag.test.ts
 vp run release:smoke
 vp run build:desktop
 vp run --filter @t3tools/marketing typecheck
