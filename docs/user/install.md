@@ -28,8 +28,17 @@ Current desktop builds are not signed with an Apple Developer ID. After Chrome o
 downloads the DMG, macOS may say **Akeru Bot (Alpha) is damaged and can't be opened**. That
 message is Gatekeeper rejecting an unsigned app, not a corrupt disk image.
 
-Drag **Akeru Bot (Alpha).app** into `/Applications`, then remove the quarantine flag from the
-installed copy and open it:
+Download both `Akeru-Bot-<version>-arm64.dmg` and `SHA256SUMS` from the same
+[GitHub Release](https://github.com/opencoredev/akeru-bot/releases). Official releases support
+Apple silicon only. Put those two files in the same folder and verify the DMG before you open it:
+
+```bash
+grep 'Akeru-Bot-.*-arm64\.dmg$' SHA256SUMS | shasum -a 256 -c -
+```
+
+Stop if the checksum is missing or does not match. Then mount the verified DMG, drag
+**Akeru Bot (Alpha).app** into `/Applications`, and remove quarantine only from that installed
+copy:
 
 ```bash
 xattr -d com.apple.quarantine "/Applications/Akeru Bot (Alpha).app"
