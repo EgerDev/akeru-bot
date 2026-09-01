@@ -2,6 +2,7 @@ import type {
   AkeruConversationMemorySnapshot,
   AkeruMemoryThreadAccess,
   BotEngine,
+  BotId,
   ModelSelection,
   ProviderInteractionMode,
   ProviderInterruptTurnInput,
@@ -36,6 +37,13 @@ export interface AgentControllerAvailableEngine {
 export interface AgentControllerEngineSelection extends AgentControllerAvailableEngine {
   readonly mode: ProviderInteractionMode;
 }
+
+export type AgentControllerSendTurnInput = ProviderSendTurnInput & {
+  readonly botUsage?: {
+    readonly botId: BotId;
+    readonly capLimit: number;
+  };
+};
 
 export interface AgentControllerShape {
   readonly configurePluginRuntime?: (input: {
@@ -79,7 +87,7 @@ export interface AgentControllerShape {
   ) => Effect.Effect<ProviderSession, AgentControllerError>;
 
   readonly sendTurn: (
-    input: ProviderSendTurnInput,
+    input: AgentControllerSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, AgentControllerError>;
 
   readonly interruptTurn: (
