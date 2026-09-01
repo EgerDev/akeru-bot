@@ -38,6 +38,7 @@ export interface AkeruSessionResourceInput {
   readonly workspaceResourceKey: string;
   readonly workspaceId: string;
   readonly botSandbox?: BotSandbox | null;
+  readonly sandboxEnvironment?: Readonly<Record<string, string>>;
   readonly userComputerCwd?: string;
   readonly mcpServers: readonly McpServer[];
 }
@@ -132,7 +133,10 @@ export class AkeruSessionResources {
               "provider.json",
             ),
             ...(isRemoteBotSandbox(input.botSandbox)
-              ? { sandbox: input.botSandbox }
+              ? {
+                  sandbox: input.botSandbox,
+                  ...(input.sandboxEnvironment ? { environment: input.sandboxEnvironment } : {}),
+                }
               : {
                   sandbox: "local" as const,
                   localRoot: NodePath.join(

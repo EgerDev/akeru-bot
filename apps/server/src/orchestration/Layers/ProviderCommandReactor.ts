@@ -15,6 +15,7 @@ import {
   ThreadId,
   type ProviderSession,
   resolveBotMcpServers,
+  SANDBOX_PROVIDER_CREDENTIALS,
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
@@ -42,6 +43,7 @@ import type { AgentControllerError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import {
   botRuntimeResourceScope,
+  botWorkspaceCredentialFingerprint,
   botWorkspaceResourceKey,
 } from "../../provider/botWorkspacePool.ts";
 import {
@@ -718,8 +720,8 @@ const make = Effect.gen(function* () {
       ? yield* projectionSnapshotQuery.getOriginalProjectIdByWorkspaceRoot(project.workspaceRoot)
       : Option.none<ProjectId>();
     const mcpServers = yield* resolveControllerMcpServers(thread);
-    const botSandboxBrowserSharing = (yield* serverSettingsService.getSettings)
-      .botSandboxBrowserSharing;
+    const serverSettings = yield* serverSettingsService.getSettings;
+    const botSandboxBrowserSharing = serverSettings.botSandboxBrowserSharing;
     const respondingBotId = resolveControllerBotId(thread);
     const respondingBot =
       respondingBotId === null
@@ -733,6 +735,28 @@ const make = Effect.gen(function* () {
         : (yield* projectionSnapshotQuery.getCommandReadModel()).groups.find(
             (group) => group.id === thread.groupId,
           );
+    const effectiveSandbox = respondingBot?.sandbox ?? serverSettings.sandbox.defaultProvider;
+    const sandboxEnvironment =
+      effectiveSandbox === "local"
+        ? undefined
+        : Object.fromEntries(
+            serverSettings.sandbox.providers[effectiveSandbox].environment.map((variable) => [
+              variable.name,
+              variable.value,
+            ]),
+          );
+    if (effectiveSandbox !== "local") {
+      const missingCredential = SANDBOX_PROVIDER_CREDENTIALS[effectiveSandbox].find(
+        (credential) => !(sandboxEnvironment?.[credential.name] ?? "").trim(),
+      );
+      if (missingCredential) {
+        return yield* new ProviderAdapterRequestError({
+          provider: providerErrorLabel(preferredProvider),
+          method: "thread.turn.start",
+          detail: `Connect ${effectiveSandbox} in Settings before using it as a bot sandbox.`,
+        });
+      }
+    }
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: project ? [project] : [],
@@ -743,7 +767,12 @@ const make = Effect.gen(function* () {
         ...(respondingBotId ? { botId: respondingBotId } : {}),
         threadId,
       }),
-      sandbox: respondingBot?.sandbox ?? null,
+      sandbox: effectiveSandbox,
+      ...(sandboxEnvironment
+        ? {
+            credentialFingerprint: botWorkspaceCredentialFingerprint(sandboxEnvironment),
+          }
+        : {}),
     });
 
     const startProviderSession = (input?: {
@@ -778,7 +807,8 @@ const make = Effect.gen(function* () {
               },
             }
           : {}),
-        botSandbox: respondingBot?.sandbox ?? null,
+        botSandbox: effectiveSandbox,
+        ...(sandboxEnvironment ? { botSandboxEnvironment: sandboxEnvironment } : {}),
         botSandboxBrowserSharing,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: desiredRuntimeMode,

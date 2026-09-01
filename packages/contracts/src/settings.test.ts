@@ -267,6 +267,47 @@ describe("ServerSettings bot sandbox and browser sharing", () => {
   });
 });
 
+describe("ServerSettings sandbox providers", () => {
+  it("defaults to local with cloud providers disconnected", () => {
+    expect(decodeServerSettings({}).sandbox).toEqual({
+      defaultProvider: "local",
+      autoIdle: true,
+      providers: {
+        e2b: { environment: [] },
+        daytona: { environment: [] },
+        vercel: { environment: [] },
+        upstash: { environment: [] },
+      },
+    });
+  });
+
+  it("accepts a provider credential patch", () => {
+    expect(
+      decodeServerSettingsPatch({
+        sandbox: {
+          defaultProvider: "e2b",
+          providers: {
+            e2b: {
+              environment: [{ name: "E2B_API_KEY", value: "secret", sensitive: true }],
+            },
+          },
+        },
+      }).sandbox,
+    ).toEqual({
+      defaultProvider: "e2b",
+      providers: {
+        e2b: {
+          environment: [{ name: "E2B_API_KEY", value: "secret", sensitive: true }],
+        },
+      },
+    });
+  });
+
+  it("keeps automatic idle cleanup enabled", () => {
+    expect(() => decodeServerSettingsPatch({ sandbox: { autoIdle: false } })).toThrow();
+  });
+});
+
 describe("ServerSettings local execution", () => {
   it("asks first by default and accepts full access only as an opt-in", () => {
     expect(decodeServerSettings({}).localExecutionMode).toBe("approval-required");

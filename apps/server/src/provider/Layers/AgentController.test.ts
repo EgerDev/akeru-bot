@@ -2165,9 +2165,19 @@ describe("AgentControllerLive", () => {
     }).pipe(Effect.provide(layer), Effect.orDie);
   });
 
-  it.effect("creates a remote Mastra workspace for the bot sandbox provider", () => {
+  it.effect("creates a credentialed remote workspace for a delegated sandbox grant", () => {
     const bridge = makeBridge();
     const mastra = makeMastraHarness();
+    const access: AkeruDelegationAccessGrant = {
+      allowedToolIds: ["Shell", "Read"],
+      memoryScopes: [],
+      sandbox: "upstash",
+      runtimeMode: "full-access",
+      hasUserComputer: false,
+      enabledMcpServerIds: [],
+      disabledMcpServerIds: [],
+      approvalCeiling: "secrets",
+    };
     const remote = new Workspace({
       filesystem: new LocalFilesystem({ basePath: process.cwd() }),
       sandbox: new LocalSandbox({ workingDirectory: process.cwd() }),
@@ -2183,6 +2193,14 @@ describe("AgentControllerLive", () => {
       makeMastraHarness: mastra.factory,
       makeRemoteWorkspace,
       makeBotBrowser: makeBotBrowser as never,
+      delegationRuntime: {
+        send: vi.fn(async () => null),
+        sendToUser: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        parentFinished: vi.fn(async () => undefined),
+        accessForThread: () => access,
+      },
     }).pipe(
       Layer.provide(
         Layer.mergeAll(
@@ -2205,6 +2223,10 @@ describe("AgentControllerLive", () => {
         modelSelection: codexSelection,
         runtimeMode: "full-access",
         botSandbox: "upstash",
+        botSandboxEnvironment: {
+          UPSTASH_REDIS_REST_URL: "https://sandbox.example",
+          UPSTASH_REDIS_REST_TOKEN: "sandbox-token",
+        },
       });
 
       expect(makeRemoteWorkspace).toHaveBeenCalledOnce();
@@ -2212,6 +2234,10 @@ describe("AgentControllerLive", () => {
         expect.objectContaining({
           threadId: `thread-${codexThreadId}`,
           sandbox: "upstash",
+          environment: {
+            UPSTASH_REDIS_REST_URL: "https://sandbox.example",
+            UPSTASH_REDIS_REST_TOKEN: "sandbox-token",
+          },
           workspaceId: expect.stringMatching(/^akeru-[a-f0-9]{24}$/),
           identityFile: expect.stringMatching(/provider\.json$/),
         }),
