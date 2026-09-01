@@ -119,6 +119,7 @@ for (const [needle, label] of [
   ["runner: ubuntu-24.04", "GitHub-hosted Linux runner"],
   ["Signing credentials must be either complete or absent.", "unsigned signing fallback"],
   ["--signed", "existing signed build path"],
+  ["linker-signed", "unsigned macOS linker-stub rejection"],
   ["xcrun notarytool submit", "macOS notarization"],
   ["verify-release-assets.ts", "asset name and hash verification"],
   ["gh release create", "stable GitHub Release"],
@@ -178,6 +179,11 @@ assertContains(
   desktopArtifactBuilder,
   'const DESKTOP_APP_ID = "dev.leodoes.akeru"',
   "Akeru desktop bundle identifier is missing.",
+);
+assertContains(
+  desktopArtifactBuilder,
+  'identity: "-"',
+  "Unsigned macOS builds do not opt into a sealed ad-hoc signature.",
 );
 
 for (const relativePath of [

@@ -76,7 +76,9 @@ authenticated.
 
 ### Desktop `.dmg` packaging notes
 
-- Default build is unsigned/not notarized for local sharing.
+- Default build is unsigned/not notarized for local sharing. Unsigned macOS builds still apply a
+  sealed ad-hoc signature (`identity: "-"`) so Gatekeeper does not treat Electron's leftover
+  linker-signed stub as a damaged app. Notarized Developer ID builds require `--signed`.
 - The DMG build uses `assets/prod/akeru-macos-1024.png`, a safe-area export of the production
   favicon artwork, as the production app icon source.
 - Production DMGs use neutral chrome. Blueprint artwork remains exclusive to Dev builds. Packaging

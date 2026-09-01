@@ -1844,10 +1844,15 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           schemes: ["akeru", "akeru-dev", "t3code", "t3code-dev"],
         },
       ],
-      // electron-builder notarizes and staples the signed app before target
-      // builders package the DMG. CI notarizes the resulting DMG separately.
+      // Skipping codesign leaves Electron's linker-signed stub
+      // (Identifier=Electron, no sealed resources). Gatekeeper then reports the
+      // downloaded DMG as damaged. Unsigned builds opt into a sealed ad-hoc
+      // signature; Developer ID builds keep using CSC_NAME and notarize.
+      hardenedRuntime: true,
+      gatekeeperAssess: false,
       notarize: signed,
-      ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      sign: path.join(repoRoot, "scripts/sign-macos.ts"),
+      ...(signed ? {} : { identity: "-" }),
       ...(macSigning
         ? {
             entitlements: macSigning.entitlementsPath,
@@ -2634,9 +2639,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   );
 
   const macEntitlementsPath =
-    options.platform === "mac" && options.signed
-      ? path.join(stageAppDir, "entitlements.mac.plist")
-      : undefined;
+    options.platform === "mac" ? path.join(stageAppDir, "entitlements.mac.plist") : undefined;
   if (macEntitlementsPath) {
     yield* fs.writeFileString(macEntitlementsPath, renderMacEntitlements());
   }

@@ -14,6 +14,7 @@ describe("installPromptPlatformForDownload", () => {
 
   it("explains why macOS may block the app", () => {
     expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/paid Developer Program/);
-    expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/macOS may block Akeru Bot/);
+    expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/damaged/);
+    expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/Gatekeeper/);
   });
 });

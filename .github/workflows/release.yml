@@ -220,6 +220,44 @@ jobs:
           xcrun stapler validate "${apps[0]}"
           spctl --assess --type execute --verbose=2 "${apps[0]}"
 
+      - name: Verify unsigned macOS app signature
+        if: matrix.platform == 'mac' && env.SIGNED != 'true'
+        shell: bash
+        run: |
+          dmg="release/Akeru-Bot-$RELEASE_VERSION-arm64.dmg"
+          mount_point="$RUNNER_TEMP/akeru-unsigned-dmg"
+          mkdir -p "$mount_point"
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_point"
+          cleanup() {
+            hdiutil detach "$mount_point" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          apps=("$mount_point"/*.app)
+          if (( ${#apps[@]} != 1 )); then
+            printf 'Expected one app in the DMG, found %s.\n' "${#apps[@]}" >&2
+            exit 1
+          fi
+          app="${apps[0]}"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          signature="$(codesign -dv --verbose=4 "$app" 2>&1)"
+          printf '%s\n' "$signature"
+          if printf '%s\n' "$signature" | grep -q 'linker-signed'; then
+            printf 'Unsigned macOS builds must replace Electron linker-signed stubs.\n' >&2
+            exit 1
+          fi
+          if printf '%s\n' "$signature" | grep -q 'Identifier=Electron$'; then
+            printf 'Packaged app still uses the Electron identifier.\n' >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$signature" | grep -q 'Identifier=dev.leodoes.akeru$'; then
+            printf 'Packaged app is missing the Akeru bundle identifier.\n' >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$signature" | grep -q 'Sealed Resources version='; then
+            printf 'Packaged app is missing sealed resources.\n' >&2
+            exit 1
+          fi
+
       - name: Launch macOS DMG
         if: matrix.platform == 'mac'
         run: vp run test:desktop-packaged-mac -- "release/Akeru-Bot-$RELEASE_VERSION-arm64.dmg"

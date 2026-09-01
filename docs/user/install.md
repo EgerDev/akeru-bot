@@ -22,6 +22,22 @@ This starts the Akeru Bot server on your machine and opens the local web app. Us
 Download the latest installer for your platform from
 [GitHub Releases](https://github.com/opencoredev/akeru-bot/releases).
 
+### macOS Gatekeeper
+
+Current desktop builds are not signed with an Apple Developer ID. After Chrome or Safari
+downloads the DMG, macOS may say **Akeru Bot (Alpha) is damaged and can't be opened**. That
+message is Gatekeeper rejecting an unsigned app, not a corrupt disk image.
+
+Drag **Akeru Bot (Alpha).app** into `/Applications`, then remove the quarantine flag from the
+installed copy and open it:
+
+```bash
+xattr -d com.apple.quarantine "/Applications/Akeru Bot (Alpha).app"
+open "/Applications/Akeru Bot (Alpha).app"
+```
+
+Do not turn off Gatekeeper or change any system-wide security setting.
+
 ## Providers
 
 Akeru Bot drives provider CLIs; it does not ship them. Install the CLI for each provider you want
