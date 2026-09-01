@@ -4,7 +4,12 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import { AuthStorage } from "@mastra/code-sdk/auth/storage";
-import { createMcpManager, type McpServerConfig } from "@mastra/code-sdk/mcp/index";
+import {
+  createMcpManager,
+  type McpManager,
+  type McpServerConfig,
+} from "@mastra/code-sdk/mcp/index";
+import { TOOL_NAME_OVERRIDES } from "@mastra/code-sdk/tool-names";
 import type {
   AgentControllerEvent,
   MastraDBMessage,
@@ -67,7 +72,9 @@ import {
 } from "../../subscription-auth/service.ts";
 import {
   akeruActionNeedsApproval,
+  akeruToolCategory,
   createAkeruMastraHarness,
+  criticalAkeruAction,
   mastraModelId,
   type AkeruMastraHarness,
   type AkeruMastraHarnessOptions,
@@ -111,6 +118,9 @@ import { LegacyProviderBridge } from "../Services/LegacyProviderBridge.ts";
 
 const DEFAULT_MODE_ID = "build";
 const PLAN_MODE_ID = "plan";
+const BUILTIN_MASTRA_TOOL_NAMES: ReadonlySet<string> = new Set(
+  Object.values(TOOL_NAME_OVERRIDES).map((tool) => tool.name),
+);
 type MastraSession = AkeruMastraSession;
 
 interface ResolvedEngine {
@@ -157,7 +167,13 @@ interface ActiveSession {
   readonly connectorSessionApprovals: Set<string>;
   toolSession: AkeruToolSession;
   readonly workspaceResourceKey: string;
+  readonly pendingApprovals: Map<string, PendingApproval>;
   readonly unsubscribe: () => void;
+}
+
+interface PendingApproval {
+  readonly toolName: string;
+  readonly action: string;
 }
 
 export interface AgentControllerLiveOptions {
@@ -298,12 +314,29 @@ export function mcpServerIdForToolName(
 
 function permissionPolicy(
   runtimeMode: RuntimeMode,
-  category: "read" | "edit" | "execute" | "mcp" | "other",
+  category: ReturnType<typeof akeruToolCategory>,
 ): "allow" | "ask" {
   if (runtimeMode === "full-access" || runtimeMode === "auto") return "allow";
   if (category === "read") return "allow";
   if (runtimeMode === "auto-accept-edits" && category === "edit") return "allow";
   return "ask";
+}
+
+function mcpToolNeedsApproval(manager: McpManager | undefined, toolName: string): boolean {
+  if (BUILTIN_MASTRA_TOOL_NAMES.has(toolName)) return false;
+  if (!manager) return true;
+  const tools = manager.getTools();
+  if (!tools || !Object.hasOwn(tools, toolName)) return true;
+  const tool = tools[toolName] as {
+    readonly mcp?: { readonly annotations?: { readonly readOnlyHint?: boolean } };
+  };
+  return tool.mcp?.annotations?.readOnlyHint !== true;
+}
+
+function approvalDetail(toolName: string, action: string | null, oneUse: boolean): string {
+  if (!oneUse) return `Allow ${toolName}?`;
+  const target = action ? `${action} action with ${toolName}` : `action with ${toolName}`;
+  return `Approve this ${target}? This approval applies only to the pending action. It cannot undo completed work.`;
 }
 
 function usesMastraCode(provider: ProviderDriverKind): boolean {
@@ -775,15 +808,32 @@ const make = (options?: AgentControllerLiveOptions) =>
       }
     };
 
-    const cancelPendingApprovals = (threadId: ThreadId, active: ActiveSession) => {
-      for (const requestId of active.approvalRequests.keys()) {
-        publish({
-          ...baseEvent(threadId, active, active.activeTurn?.turnId),
-          requestId: RuntimeRequestId.make(requestId),
-          type: "request.resolved",
-          payload: { requestType: "dynamic_tool_call", decision: "cancel" },
-        });
+    const cancelPendingApproval = (
+      threadId: ThreadId,
+      active: ActiveSession,
+      requestId: string,
+      pending: PendingApproval,
+    ) => {
+      publish({
+        ...baseEvent(threadId, active, active.activeTurn?.turnId),
+        requestId: RuntimeRequestId.make(requestId),
+        type: "request.resolved",
+        payload: {
+          requestType: "dynamic_tool_call",
+          decision: "cancel",
+          actor: "system",
+          target: pending.toolName,
+          action: pending.action,
+          outcome: "cancelled",
+        },
+      });
+    };
+
+    const cancelAllPendingApprovals = (threadId: ThreadId, active: ActiveSession) => {
+      for (const [requestId, pending] of active.pendingApprovals) {
+        cancelPendingApproval(threadId, active, requestId, pending);
       }
+      active.pendingApprovals.clear();
       active.approvalRequests.clear();
       toolRuntime.clearApprovals(String(threadId));
     };
@@ -799,7 +849,7 @@ const make = (options?: AgentControllerLiveOptions) =>
       queueTurnMemory(threadId, active, turn);
       turn.finished = true;
       completeAssistantMessages(threadId, active, turn);
-      cancelPendingApprovals(threadId, active);
+      cancelAllPendingApprovals(threadId, active);
       publish({
         ...baseEvent(threadId, active, turn.turnId),
         type: "turn.completed",
@@ -936,14 +986,7 @@ const make = (options?: AgentControllerLiveOptions) =>
         case "tool_end": {
           if (!turn) return;
           const toolName = active.toolNames.get(event.toolCallId) ?? "tool";
-          if (active.approvalRequests.delete(event.toolCallId)) {
-            publish({
-              ...baseEvent(threadId, active, turn.turnId),
-              requestId: RuntimeRequestId.make(event.toolCallId),
-              type: "request.resolved",
-              payload: { requestType: "dynamic_tool_call", decision: "cancel" },
-            });
-          }
+          active.approvalRequests.delete(event.toolCallId);
           active.toolNames.delete(event.toolCallId);
           const mcpServerId = mcpServerIdForToolName(active.mcpServerIds, toolName);
           if (mcpServerId && !event.denied) {
@@ -958,6 +1001,11 @@ const make = (options?: AgentControllerLiveOptions) =>
             toolName,
             event.isError || event.denied ? "failure" : "success",
           );
+          const pending = active.pendingApprovals.get(event.toolCallId);
+          if (pending) {
+            cancelPendingApproval(threadId, active, event.toolCallId, pending);
+            active.pendingApprovals.delete(event.toolCallId);
+          }
           publish({
             ...baseEvent(threadId, active, turn.turnId),
             itemId: RuntimeItemId.make(event.toolCallId),
@@ -973,13 +1021,32 @@ const make = (options?: AgentControllerLiveOptions) =>
           });
           return;
         }
-        case "tool_approval_required":
+        case "tool_approval_required": {
           if (!turn) return;
           completeAssistantMessages(threadId, active, turn);
           active.toolNames.set(event.toolCallId, event.toolName);
+          const action = criticalAkeruAction(event.toolName, event.args);
+          const oneUseApproval =
+            akeruActionNeedsApproval(event.toolName, event.args) ||
+            mcpToolNeedsApproval(sessionResources.getMcpManager(String(threadId)), event.toolName);
+          if (
+            event.toolName !== AKERU_PRODUCT_FEEDBACK_TOOL_NAME &&
+            !oneUseApproval &&
+            permissionPolicy(active.runtimeMode, akeruToolCategory(event.toolName)) === "allow"
+          ) {
+            active.session.respondToToolApproval({
+              toolCallId: event.toolCallId,
+              decision: "approve",
+            });
+            return;
+          }
           active.approvalRequests.set(event.toolCallId, {
             name: event.toolName,
             input: event.args,
+          });
+          active.pendingApprovals.set(event.toolCallId, {
+            toolName: event.toolName,
+            action: action ?? "unclassified",
           });
           turn.waiting = true;
           publishSessionState(threadId, active, "waiting");
@@ -989,12 +1056,15 @@ const make = (options?: AgentControllerLiveOptions) =>
             type: "request.opened",
             payload: {
               requestType: "dynamic_tool_call",
+              actor: "agent",
+              target: event.toolName,
               detail: isCodexComputerUseTool(event.toolName)
                 ? "Allow Computer Use?"
                 : event.toolName === AKERU_PRODUCT_FEEDBACK_TOOL_NAME
                   ? "Review product feedback"
-                  : `Allow ${event.toolName}?`,
+                  : approvalDetail(event.toolName, action, oneUseApproval),
               toolName: isCodexComputerUseTool(event.toolName) ? "Computer Use" : event.toolName,
+              ...(action ? { action } : {}),
               args: isCodexComputerUseTool(event.toolName) ? undefined : event.args,
               options: isCodexComputerUseTool(event.toolName)
                 ? [
@@ -1008,10 +1078,13 @@ const make = (options?: AgentControllerLiveOptions) =>
                     ]
                   : AKERU_TOOL_CATALOG.some((tool) => tool.id === event.toolName) ||
                       isMemoryToolId(event.toolName) ||
-                      akeruActionNeedsApproval(event.toolName, event.args)
+                      oneUseApproval
                     ? [
-                        { decision: "accept", label: "Allow" },
                         { decision: "decline", label: "Decline" },
+                        {
+                          decision: "accept",
+                          label: oneUseApproval ? "Approve" : "Allow",
+                        },
                       ]
                     : [
                         { decision: "accept", label: "Allow" },
@@ -1021,6 +1094,7 @@ const make = (options?: AgentControllerLiveOptions) =>
             },
           });
           return;
+        }
         case "tool_suspended":
           if (!turn) return;
           completeAssistantMessages(threadId, active, turn);
@@ -1489,6 +1563,7 @@ const make = (options?: AgentControllerLiveOptions) =>
           connectorSessionApprovals: new Set<string>(),
           toolSession,
           workspaceResourceKey,
+          pendingApprovals: new Map<string, PendingApproval>(),
           unsubscribe,
         } satisfies ActiveSession;
       }).pipe(Effect.onError(() => cleanupCreatedSession));
@@ -1645,8 +1720,10 @@ const make = (options?: AgentControllerLiveOptions) =>
       if (!active.activeTurn) return;
       const toolCallId = String(input.requestId);
       const toolRequest = active.approvalRequests.get(toolCallId);
-      if (!toolRequest) return;
+      const pendingApproval = active.pendingApprovals.get(toolCallId);
+      if (!toolRequest || !pendingApproval) return;
       active.approvalRequests.delete(toolCallId);
+      active.pendingApprovals.delete(toolCallId);
       const { name: toolName, input: toolInput } = toolRequest;
       const akeruTool = AKERU_TOOL_CATALOG.find((tool) => tool.id === toolName);
       const runtimeToolId = akeruTool?.id ?? (isMemoryToolId(toolName) ? toolName : undefined);
@@ -1670,19 +1747,31 @@ const make = (options?: AgentControllerLiveOptions) =>
           active.session.permissions.setForTool({ toolName, policy: "allow" }),
         );
       }
+      const target = pendingApproval.toolName;
+      const decision =
+        input.decision === "acceptForSession" || input.decision === "acceptAlways"
+          ? "accept"
+          : input.decision;
       if (active.activeTurn) active.activeTurn.waiting = false;
       active.session.respondToToolApproval({
         toolCallId,
         decision:
           runtimeToolId && input.decision !== "decline" && input.decision !== "cancel"
             ? "approve"
-            : approvalDecision(input.decision),
+            : approvalDecision(decision),
       });
       publish({
         ...baseEvent(input.threadId, active, active.activeTurn?.turnId),
         requestId: RuntimeRequestId.make(toolCallId),
         type: "request.resolved",
-        payload: { requestType: "dynamic_tool_call" as const, decision: input.decision },
+        payload: {
+          requestType: "dynamic_tool_call" as const,
+          decision,
+          actor: "user",
+          target,
+          action: pendingApproval.action,
+          outcome: decision === "accept" ? "approved" : "denied",
+        },
       });
       publishSessionState(input.threadId, active, "running");
     });
@@ -1746,9 +1835,12 @@ const make = (options?: AgentControllerLiveOptions) =>
         }
         return yield* legacyProviderBridge.stopSession(input);
       }
-      cancelPendingApprovals(input.threadId, active);
       active.session.abort();
-      if (active.activeTurn) finishTurn(input.threadId, active, "interrupted");
+      if (active.activeTurn) {
+        finishTurn(input.threadId, active, "interrupted");
+      } else {
+        cancelAllPendingApprovals(input.threadId, active);
+      }
       active.unsubscribe();
       publishSessionState(input.threadId, active, "stopped");
       yield* runMastra("deleteSession", () =>
