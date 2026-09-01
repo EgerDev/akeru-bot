@@ -1,11 +1,33 @@
-import type { McpManager } from "@mastra/code-sdk/mcp/index";
-import type { OrchestrationCommand } from "@t3tools/contracts";
+import type { McpManager, McpServerStatus } from "@mastra/code-sdk/mcp/index";
+import { BotId, type OrchestrationCommand } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   createAkeruCatalogToolHandlers,
   createAkeruPluginRuntime,
 } from "./AkeruCatalogToolHandlers.ts";
+
+const connectedStatus: McpServerStatus = {
+  name: "search",
+  connected: true,
+  toolCount: 1,
+  toolNames: ["search_web"],
+  transport: "http",
+};
+
+function healthOptions(overrides = {}) {
+  return {
+    getRequestHealth: () => undefined,
+    recordSuccess: vi.fn(),
+    recordFailure: vi.fn(),
+    getDependencies: async () => ({
+      dependentBots: [{ id: BotId.make("bot-akeru"), name: "Akeru" }],
+      dependentRoutines: [],
+    }),
+    now: () => "2026-09-01T02:00:00.000Z",
+    ...overrides,
+  };
+}
 
 const now = "2026-01-01T00:00:00.000Z";
 function snapshot(
@@ -222,6 +244,80 @@ describe("Akeru catalog MCP tool handlers", () => {
     await expect(runtime.install("typefully")).rejects.toThrow("not available for installation");
     await expect(runtime.install("missing")).rejects.toThrow("was not found");
     expect(dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("reports real request evidence instead of treating a connection as healthy", async () => {
+    const manager = { getServerStatuses: () => [connectedStatus] } as unknown as McpManager;
+    const handler = createAkeruCatalogToolHandlers(
+      manager,
+      undefined,
+      healthOptions({
+        getRequestHealth: () => ({
+          health: "failed" as const,
+          lastSuccessfulRequestAt: "2026-09-01T01:00:00.000Z",
+          lastFailedRequest: { at: "2026-09-01T01:30:00.000Z", message: "OAuth expired." },
+        }),
+      }),
+    ).GetMcpServerStatus!;
+
+    await expect(
+      handler({ input: { serverId: "search" }, emitProgress: vi.fn() }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        connectionState: "connected",
+        healthTest: "failed",
+        authenticationExpiresAt: null,
+        lastFailure: { at: "2026-09-01T01:30:00.000Z", message: "OAuth expired." },
+        dependentBots: [{ id: "bot-akeru", name: "Akeru" }],
+        dependentRoutines: [],
+      }),
+    );
+  });
+
+  it.each(["TestMcpServer", "ReconnectMcpServer"] as const)(
+    "%s records the real reconnect result",
+    async (toolId) => {
+      const reconnectServer = vi.fn(async () => connectedStatus);
+      const manager = {
+        getServerStatuses: () => [connectedStatus],
+        reconnectServer,
+      } as unknown as McpManager;
+      const recordSuccess = vi.fn();
+      const onRecovery = vi.fn();
+      const handler = createAkeruCatalogToolHandlers(
+        manager,
+        undefined,
+        healthOptions({ recordSuccess, onRecovery }),
+      )[toolId]!;
+
+      await expect(
+        handler({ input: { serverId: "search" }, emitProgress: vi.fn() }),
+      ).resolves.toEqual(expect.objectContaining({ connected: true }));
+      expect(reconnectServer).toHaveBeenCalledWith("search");
+      expect(recordSuccess).toHaveBeenCalledWith("search", "2026-09-01T02:00:00.000Z");
+      expect(onRecovery).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("records and escalates a failed health test", async () => {
+    const failed = { ...connectedStatus, connected: false, error: "OAuth expired." };
+    const manager = {
+      getServerStatuses: () => [connectedStatus],
+      reconnectServer: async () => failed,
+    } as unknown as McpManager;
+    const recordFailure = vi.fn();
+    const onFailure = vi.fn();
+    const handler = createAkeruCatalogToolHandlers(
+      manager,
+      undefined,
+      healthOptions({ recordFailure, onFailure }),
+    ).TestMcpServer!;
+
+    await expect(handler({ input: { serverId: "search" }, emitProgress: vi.fn() })).rejects.toThrow(
+      "OAuth expired",
+    );
+    expect(recordFailure).toHaveBeenCalledOnce();
+    expect(onFailure).toHaveBeenCalledOnce();
   });
 
   it("removes installed plugins with the pre-change dependent view", async () => {

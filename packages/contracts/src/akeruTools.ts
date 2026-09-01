@@ -75,6 +75,9 @@ export const AkeruToolId = Schema.Literals([
   "GetPlugin",
   "InstallPlugin",
   "UninstallPlugin",
+  "GetMcpServerStatus",
+  "TestMcpServer",
+  "ReconnectMcpServer",
   "UpdateBotProfile",
   "AuthenticateMcpServer",
   "RestartMcpServers",
@@ -148,6 +151,9 @@ export const AkeruToolInputSchemas = {
   GetPlugin: Schema.Struct({ pluginId: TrimmedNonEmptyString }),
   InstallPlugin: Schema.Struct({ pluginId: TrimmedNonEmptyString }),
   UninstallPlugin: Schema.Struct({ pluginId: TrimmedNonEmptyString }),
+  GetMcpServerStatus: McpServerIdInput,
+  TestMcpServer: McpServerIdInput,
+  ReconnectMcpServer: McpServerIdInput,
   UpdateBotProfile: UpdateBotProfileInput,
   AuthenticateMcpServer: McpServerIdInput,
   RestartMcpServers: Schema.Struct({
@@ -297,6 +303,13 @@ export const AKERU_TOOL_CATALOG = [
   }),
   define("UninstallPlugin", "bot-workspace", "Remove a curated plugin after inspecting it.", {
     approval: "delete",
+  }),
+  define("GetMcpServerStatus", "bot-workspace", "Inspect an MCP server connection."),
+  define("TestMcpServer", "bot-workspace", "Run a real MCP server connection test.", {
+    approval: "production",
+  }),
+  define("ReconnectMcpServer", "bot-workspace", "Reconnect one MCP server.", {
+    approval: "production",
   }),
   define("UpdateBotProfile", "bot-workspace", "Update this bot's public profile."),
   define("AuthenticateMcpServer", "bot-workspace", "Authenticate an MCP server.", {

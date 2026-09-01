@@ -2,8 +2,9 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 
-import type { McpManager } from "@mastra/code-sdk/mcp/index";
+import type { McpManager, McpServerStatus } from "@mastra/code-sdk/mcp/index";
 import {
+  type BotId,
   CommandId,
   McpServerId,
   type AkeruToolId,
@@ -12,6 +13,7 @@ import {
   type OrchestrationCommand,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 import {
   isInstallableManifest,
@@ -49,12 +51,37 @@ const catalogManifestModules =
       })
     : loadNodeCatalogModules();
 
+import type { RequestHealthStatus } from "../subscription-auth/service.ts";
+
 export interface AkeruCatalogToolHandlerInput {
   readonly input: unknown;
   readonly emitProgress: (summary: string) => void | Promise<void>;
 }
 
 export type AkeruCatalogToolHandler = (input: AkeruCatalogToolHandlerInput) => Promise<unknown>;
+
+export interface AkeruMcpDependencies {
+  readonly dependentBots: ReadonlyArray<{ readonly id: BotId; readonly name: string }>;
+  readonly dependentRoutines: ReadonlyArray<string>;
+}
+
+export interface AkeruMcpHealthHandlerOptions {
+  readonly getRequestHealth: (serverId: string) => RequestHealthStatus | undefined;
+  readonly recordSuccess: (serverId: string, at: string) => void;
+  readonly recordFailure: (serverId: string, message: string, at: string) => void;
+  readonly getDependencies: (serverId: string) => Promise<AkeruMcpDependencies>;
+  readonly onFailure?: (
+    serverId: string,
+    message: string,
+    dependencies: AkeruMcpDependencies,
+  ) => void | Promise<void>;
+  readonly onRecovery?: (
+    serverId: string,
+    dependencies: AkeruMcpDependencies,
+  ) => void | Promise<void>;
+  readonly authenticationExpiresAt?: (serverId: string) => string | undefined;
+  readonly now?: () => string;
+}
 
 type McpRuntimeStatus = ReturnType<McpManager["getServerStatuses"]>[number];
 
@@ -307,9 +334,83 @@ function requiredString(value: unknown, key: string): string {
   return candidate;
 }
 
+function requireServerStatus(mcpManager: McpManager, serverId: string): McpServerStatus {
+  const status = mcpManager.getServerStatuses().find((candidate) => candidate.name === serverId);
+  if (!status) throw new Error(`MCP server '${serverId}' is not configured for this bot.`);
+  return status;
+}
+
+async function mcpHealthStatus(
+  mcpManager: McpManager,
+  options: AkeruMcpHealthHandlerOptions,
+  serverId: string,
+  status = requireServerStatus(mcpManager, serverId),
+) {
+  const health = options.getRequestHealth(serverId);
+  const dependencies = await options.getDependencies(serverId);
+  const healthTest =
+    health?.health === "healthy" || health?.health === "recovered"
+      ? "passed"
+      : health?.health === "failed" || health?.health === "failed-first-request" || status.error
+        ? "failed"
+        : "not-run";
+  const connectionState = status.disabled
+    ? "disabled"
+    : status.authenticating
+      ? "authenticating"
+      : status.connecting
+        ? "connecting"
+        : status.connected
+          ? "connected"
+          : status.needsAuth
+            ? "authentication-required"
+            : "failed";
+  return {
+    serverId,
+    connectionState,
+    healthTest,
+    connected: status.connected,
+    transport: status.transport,
+    toolCount: status.toolCount,
+    toolNames: status.toolNames,
+    needsAuthentication: status.needsAuth ?? false,
+    authenticationExpiresAt: options.authenticationExpiresAt?.(serverId) ?? null,
+    lastSuccessfulRequestAt: health?.lastSuccessfulRequestAt ?? null,
+    lastFailure:
+      health?.lastFailedRequest ?? (status.error ? { at: null, message: status.error } : null),
+    nextRetryAt: health?.nextRetryAt ?? null,
+    dependentBots: dependencies.dependentBots,
+    dependentRoutines: dependencies.dependentRoutines,
+  };
+}
+
+async function checkMcpConnection(
+  mcpManager: McpManager,
+  options: AkeruMcpHealthHandlerOptions,
+  serverId: string,
+  emitProgress: AkeruCatalogToolHandlerInput["emitProgress"],
+  action: "Testing" | "Reconnecting",
+) {
+  requireServerStatus(mcpManager, serverId);
+  await emitProgress(`${action} MCP server '${serverId}'.`);
+  const status = await mcpManager.reconnectServer(serverId);
+  const at = options.now?.() ?? DateTime.formatIso(DateTime.nowUnsafe());
+  const dependencies = await options.getDependencies(serverId);
+  if (!status.connected) {
+    const message = status.error ?? `MCP server '${serverId}' did not connect.`;
+    options.recordFailure(serverId, message, at);
+    await options.onFailure?.(serverId, message, dependencies);
+    throw new Error(message);
+  }
+  options.recordSuccess(serverId, at);
+  await options.onRecovery?.(serverId, dependencies);
+  return mcpHealthStatus(mcpManager, options, serverId, status);
+}
+
 export function createAkeruCatalogToolHandlers(
   mcpManager?: McpManager,
   pluginRuntime?: ReturnType<typeof createAkeruPluginRuntime>,
+  health?: AkeruMcpHealthHandlerOptions,
 ): Partial<Record<AkeruToolId, AkeruCatalogToolHandler>> {
   const statuses = () => mcpManager?.getServerStatuses() ?? [];
   return {
@@ -336,6 +437,28 @@ export function createAkeruCatalogToolHandlers(
       : {}),
     ...(mcpManager
       ? {
+          ...(health
+            ? {
+                GetMcpServerStatus: async ({ input }) =>
+                  mcpHealthStatus(mcpManager, health, requiredString(input, "serverId")),
+                TestMcpServer: async ({ input, emitProgress }) =>
+                  checkMcpConnection(
+                    mcpManager,
+                    health,
+                    requiredString(input, "serverId"),
+                    emitProgress,
+                    "Testing",
+                  ),
+                ReconnectMcpServer: async ({ input, emitProgress }) =>
+                  checkMcpConnection(
+                    mcpManager,
+                    health,
+                    requiredString(input, "serverId"),
+                    emitProgress,
+                    "Reconnecting",
+                  ),
+              }
+            : {}),
           AuthenticateMcpServer: async ({ input, emitProgress }) => {
             const serverId = requiredString(input, "serverId");
             let authorizationUrl: string | undefined;

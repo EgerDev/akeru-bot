@@ -143,6 +143,9 @@ const BACKEND_NAMES: Record<
     | "GetPlugin"
     | "InstallPlugin"
     | "UninstallPlugin"
+    | "GetMcpServerStatus"
+    | "TestMcpServer"
+    | "ReconnectMcpServer"
     | "AuthenticateMcpServer"
     | "RestartMcpServers"
   >,

@@ -429,6 +429,7 @@ const make = (options?: AgentControllerLiveOptions) =>
     >();
     let channelRuntime: AkeruChannelRuntime | undefined;
     let pluginRuntime: ReturnType<typeof createAkeruPluginRuntime> | undefined;
+    let pluginRuntimeOptions: AkeruPluginRuntimeOptions | undefined;
     let botStateRuntime: AkeruBotStateRuntime | undefined;
     const childWaiters = new Map<
       string,
@@ -1427,6 +1428,11 @@ const make = (options?: AgentControllerLiveOptions) =>
         access.memoryScopes.length > 0
           ? memoryHandlers(input.memoryAccess, access.memoryScopes)
           : undefined;
+      const mcpManager = sessionResources.getMcpManager(key);
+      const mcpDependencies =
+        input.botId && input.botName
+          ? { dependentBots: [{ id: input.botId, name: input.botName }], dependentRoutines: [] }
+          : { dependentBots: [], dependentRoutines: [] };
       const toolSession: AkeruToolSession = {
         ...(botId ? { botId } : {}),
         ...(input.botName ? { botName: input.botName } : {}),
@@ -1437,8 +1443,50 @@ const make = (options?: AgentControllerLiveOptions) =>
         ...(registeredMemoryHandlers ? { memoryHandlers: registeredMemoryHandlers } : {}),
         ...(input.botId && botStateRuntime ? { botState: botStateRuntime } : {}),
         catalogHandlers: createAkeruCatalogToolHandlers(
-          sessionResources.getMcpManager(key),
+          mcpManager,
           pluginRuntime,
+          mcpManager
+            ? {
+                getRequestHealth: (serverId) => subscriptionAuth.mcpRequestHealth(serverId),
+                recordSuccess: (serverId, at) =>
+                  subscriptionAuth.recordMcpRequestSuccess(serverId, at),
+                recordFailure: (serverId, message, at) =>
+                  subscriptionAuth.recordMcpRequestFailure(serverId, message, at),
+                getDependencies: async (serverId) => {
+                  const snapshot = await pluginRuntimeOptions?.readSnapshot();
+                  return snapshot
+                    ? {
+                        dependentBots: snapshot.bots
+                          .filter(
+                            (bot) =>
+                              bot.archivedAt === null &&
+                              !bot.disabledMcpServerIds.some((id) => String(id) === serverId),
+                          )
+                          .map((bot) => ({ id: bot.id, name: bot.name })),
+                        dependentRoutines: [],
+                      }
+                    : mcpDependencies;
+                },
+                onFailure: (serverId, message, dependencies) => {
+                  for (const bot of dependencies.dependentBots) {
+                    botInbox.ensureOpen({
+                      incidentKey: `access:mcp-${serverId}:${bot.id}`,
+                      kind: "connector-failure",
+                      botId: bot.id,
+                      botName: bot.name,
+                      taskOrRoutine: `${serverId} access`,
+                      lastFailure: message,
+                      nextAction: `Reconnect ${serverId}, then retry its failed request.`,
+                    });
+                  }
+                },
+                onRecovery: (serverId, dependencies) => {
+                  for (const bot of dependencies.dependentBots) {
+                    botInbox.resolve(`access:mcp-${serverId}:${bot.id}`);
+                  }
+                },
+              }
+            : undefined,
         ),
         ...(delegatedAccess && botId ? { billedBotId: botId } : {}),
         ...(delegationRuntime && botId
@@ -1913,6 +1961,7 @@ const make = (options?: AgentControllerLiveOptions) =>
     return AgentController.of({
       configurePluginRuntime: (input: AkeruPluginRuntimeOptions) =>
         Effect.sync(() => {
+          pluginRuntimeOptions = input;
           pluginRuntime = createAkeruPluginRuntime(input);
         }),
       configureDelegation: (input) =>
