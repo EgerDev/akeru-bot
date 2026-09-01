@@ -20,4 +20,15 @@ describe("Akeru public identity", () => {
     expect(publicIdentity).not.toContain("@t3.tools");
     expect(publicIdentity).not.toContain("@ping.gg");
   });
+
+  it("serves the macOS curl installer from the official domain", () => {
+    const installRoute = sourceFile("pages/install.ts");
+    const dialog = sourceFile("components/InstallPromptDialog.astro");
+    const prompt = sourceFile("lib/downloadInstallPrompt.ts");
+
+    expect(installRoute).toContain("scripts/install-macos.sh");
+    expect(installRoute).toContain("text/plain");
+    expect(prompt).toContain("curl -fsSL https://www.akeru-bot.com/install | bash");
+    expect(dialog).toContain("Copy install command");
+  });
 });

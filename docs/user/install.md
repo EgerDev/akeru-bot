@@ -19,33 +19,33 @@ This starts the Akeru Bot server on your machine and opens the local web app. Us
 
 ## Desktop App
 
-Download the latest installer for your platform from
-[GitHub Releases](https://github.com/opencoredev/akeru-bot/releases).
+On macOS, install from Terminal. Safari and Chrome quarantine unsigned apps, so a browser
+download looks damaged even when the file is fine. `curl` does not set that flag:
+
+```bash
+curl -fsSL https://www.akeru-bot.com/install | bash
+```
+
+The script checks that you are on Apple silicon, downloads the latest arm64 DMG and
+`SHA256SUMS` from [GitHub Releases](https://github.com/opencoredev/akeru-bot/releases), verifies
+the checksum, installs **Akeru Bot (Alpha).app**, and opens it.
+
+Windows and Linux installers are on the same [GitHub Releases](https://github.com/opencoredev/akeru-bot/releases)
+page.
 
 ### macOS Gatekeeper
 
-Current desktop builds are not signed with an Apple Developer ID. After Chrome or Safari
-downloads the DMG, macOS may say **Akeru Bot (Alpha) is damaged and can't be opened**. That
-message is Gatekeeper rejecting an unsigned app, not a corrupt disk image.
-
-Download both `Akeru-Bot-<version>-arm64.dmg` and `SHA256SUMS` from the same
-[GitHub Release](https://github.com/opencoredev/akeru-bot/releases). Official releases support
-Apple silicon only. Put those two files in the same folder and verify the DMG before you open it:
+If you already downloaded the DMG in Safari or Chrome, do not open the app from the disk image.
+Verify the file first, then install and clear quarantine only on the copy in Applications:
 
 ```bash
 grep 'Akeru-Bot-.*-arm64\.dmg$' SHA256SUMS | shasum -a 256 -c -
-```
-
-Stop if the checksum is missing or does not match. Then mount the verified DMG, drag
-**Akeru Bot (Alpha).app** into `/Applications`, and remove quarantine only from that installed
-copy:
-
-```bash
 xattr -d com.apple.quarantine "/Applications/Akeru Bot (Alpha).app"
 open "/Applications/Akeru Bot (Alpha).app"
 ```
 
-Do not turn off Gatekeeper or change any system-wide security setting.
+Stop if the checksum is missing or does not match. Do not turn off Gatekeeper or change any
+system-wide security setting.
 
 ## Providers
 

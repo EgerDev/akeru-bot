@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  MAC_CURL_INSTALL_COMMAND,
   MAC_DOWNLOAD_DIALOG_BODY,
   installPromptPlatformForDownload,
 } from "./downloadInstallPrompt";
@@ -12,9 +13,10 @@ describe("installPromptPlatformForDownload", () => {
     expect(installPromptPlatformForDownload("linux", true)).toBeNull();
   });
 
-  it("explains why macOS may block the app", () => {
-    expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/paid Developer Program/);
+  it("sends macOS users to a curl install instead of a quarantined DMG", () => {
+    expect(MAC_CURL_INSTALL_COMMAND).toBe("curl -fsSL https://www.akeru-bot.com/install | bash");
+    expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/Safari and Chrome quarantine/);
     expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/damaged/);
-    expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/Gatekeeper/);
+    expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/curl does not quarantine/);
   });
 });
