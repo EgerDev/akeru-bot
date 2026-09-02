@@ -69,6 +69,7 @@ install_app() {
     mv "$new_app" "$app"
 }
 if ! install_app 2>/dev/null; then
+  rm -rf "$new_app" 2>/dev/null || true
   osascript - "$prepared_app" "$new_app" "$app" <<'APPLESCRIPT'
 on run argv
   set preparedApp to quoted form of item 1 of argv
