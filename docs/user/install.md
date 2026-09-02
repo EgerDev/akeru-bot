@@ -59,8 +59,9 @@ prepared_app="$tmp/Akeru Bot (Alpha).app"
 ditto "$source_app" "$prepared_app"
 identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$prepared_app/Contents/Info.plist")"
 [ "$identifier" = dev.leodoes.akeru ]
-new_app="/Applications/.Akeru Bot (Alpha).app.installing.$$"
-old_app="/Applications/.Akeru Bot (Alpha).app.backup.$$"
+install_id="$(uuidgen)"
+new_app="/Applications/.Akeru Bot (Alpha).app.installing.$install_id"
+old_app="/Applications/.Akeru Bot (Alpha).app.backup.$install_id"
 osascript - "$prepared_app" "$new_app" "$old_app" "$app" <<'APPLESCRIPT'
 on run argv
   set preparedApp to quoted form of item 1 of argv

@@ -27,8 +27,14 @@ describe("installPromptPlatformForDownload", () => {
     expect(MAC_CURL_INSTALL_COMMAND).toContain("Print :CFBundleIdentifier");
     expect(MAC_CURL_INSTALL_COMMAND).toContain('[ "$identifier" = dev.leodoes.akeru ]');
     expect(MAC_CURL_INSTALL_COMMAND).toContain("ditto");
-    expect(MAC_CURL_INSTALL_COMMAND).toContain('new_app="/Applications/.Akeru Bot');
-    expect(MAC_CURL_INSTALL_COMMAND).toContain('old_app="/Applications/.Akeru Bot');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('install_id="$(uuidgen)"');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain(
+      'new_app="/Applications/.Akeru Bot (Alpha).app.installing.$install_id"',
+    );
+    expect(MAC_CURL_INSTALL_COMMAND).toContain(
+      'old_app="/Applications/.Akeru Bot (Alpha).app.backup.$install_id"',
+    );
+    expect(MAC_CURL_INSTALL_COMMAND).not.toContain("backup.$$");
     expect(MAC_CURL_INSTALL_COMMAND).toContain('mv " & installedApp & " " & oldApp');
     expect(MAC_CURL_INSTALL_COMMAND).toContain('mv " & newApp & " " & installedApp');
     expect(MAC_CURL_INSTALL_COMMAND).toContain('mv " & oldApp & " " & installedApp');
