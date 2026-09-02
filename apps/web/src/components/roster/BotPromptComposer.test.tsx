@@ -97,6 +97,22 @@ describe("bot prompt composer", () => {
     expect(markup).not.toContain("max-w-4xl");
   });
 
+  it("renders an inert preview with the production composer", () => {
+    const markup = renderToStaticMarkup(
+      <BotPromptComposer
+        botName="Your bot"
+        disabled
+        readOnly
+        onSubmit={vi.fn(async () => false)}
+      />,
+    );
+
+    expect(markup).toContain('aria-disabled="true"');
+    expect(markup).toContain('readOnly=""');
+    expect(markup).toContain('tabindex="-1"');
+    expect(markup).toContain('aria-label="Send message"');
+  });
+
   it("does not render model or reasoning controls", () => {
     const markup = renderToStaticMarkup(
       <BotPromptComposer botName="Akeru" disabled={false} onSubmit={vi.fn(async () => true)} />,
