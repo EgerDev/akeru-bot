@@ -5,7 +5,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   MAC_CURL_INSTALL_COMMAND,
   MAC_DOWNLOAD_DIALOG_BODY,
-  MAC_GATEKEEPER_COMMAND,
   installPromptPlatformForDownload,
 } from "./downloadInstallPrompt";
 
@@ -24,13 +23,19 @@ describe("installPromptPlatformForDownload", () => {
     expect(MAC_CURL_INSTALL_COMMAND).toContain("|| exit 1");
     expect(MAC_CURL_INSTALL_COMMAND).toContain("shasum -a 256 -c -");
     expect(MAC_CURL_INSTALL_COMMAND).toContain("hdiutil attach");
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('ditto "$source_app" "$prepared_app"');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain("Print :CFBundleIdentifier");
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('[ "$identifier" = dev.leodoes.akeru ]');
     expect(MAC_CURL_INSTALL_COMMAND).toContain("ditto");
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('rm -rf "$app" &&');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('[ ! -e "$app" ] &&');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('" && test ! -e " & installedApp');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('ditto "$prepared_app" "$app"');
     expect(MAC_CURL_INSTALL_COMMAND).toContain("xattr -d com.apple.quarantine");
     expect(MAC_CURL_INSTALL_COMMAND).toContain('open "$app"');
     expect(MAC_CURL_INSTALL_COMMAND).not.toContain("/releases/latest/download");
     expect(MAC_CURL_INSTALL_COMMAND).not.toContain("| bash");
     expect(MAC_CURL_INSTALL_COMMAND).not.toContain("install-macos.sh");
-    expect(MAC_GATEKEEPER_COMMAND).toContain("shasum -a 256 -c - && {");
     expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/Safari and Chrome quarantine/);
     expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/damaged/);
     expect(MAC_DOWNLOAD_DIALOG_BODY).toMatch(/curl does not quarantine/);
@@ -42,6 +47,6 @@ describe("installPromptPlatformForDownload", () => {
       "utf8",
     );
     expect(docs).toContain(MAC_CURL_INSTALL_COMMAND);
-    expect(docs).toContain(MAC_GATEKEEPER_COMMAND);
+    expect(docs).not.toContain("MAC_GATEKEEPER_COMMAND");
   });
 });
