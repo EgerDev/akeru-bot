@@ -32,6 +32,9 @@ describe("installPromptPlatformForDownload", () => {
     expect(MAC_CURL_INSTALL_COMMAND).toContain('mv " & installedApp & " " & oldApp');
     expect(MAC_CURL_INSTALL_COMMAND).toContain('mv " & newApp & " " & installedApp');
     expect(MAC_CURL_INSTALL_COMMAND).toContain('mv " & oldApp & " " & installedApp');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain(
+      'echo Previous application remains at " & oldApp & " >&2',
+    );
     expect(MAC_CURL_INSTALL_COMMAND).toContain('" || { rm -rf " & newApp & "; exit 1; }');
     expect(MAC_CURL_INSTALL_COMMAND).not.toContain("install_app()");
     expect(MAC_CURL_INSTALL_COMMAND).toContain("xattr -d com.apple.quarantine");
