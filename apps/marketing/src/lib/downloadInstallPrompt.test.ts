@@ -28,12 +28,13 @@ describe("installPromptPlatformForDownload", () => {
     expect(MAC_CURL_INSTALL_COMMAND).toContain('[ "$identifier" = dev.leodoes.akeru ]');
     expect(MAC_CURL_INSTALL_COMMAND).toContain("ditto");
     expect(MAC_CURL_INSTALL_COMMAND).toContain('new_app="/Applications/.Akeru Bot');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('old_app="/Applications/.Akeru Bot');
     expect(MAC_CURL_INSTALL_COMMAND).toContain(
       'ditto "$prepared_app" "$new_app" || { rm -rf "$new_app"; return 1; }',
     );
-    expect(MAC_CURL_INSTALL_COMMAND).toContain('rm -rf "$app" &&');
-    expect(MAC_CURL_INSTALL_COMMAND).toContain('[ ! -e "$app" ] &&');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('mv "$app" "$old_app"');
     expect(MAC_CURL_INSTALL_COMMAND).toContain('mv "$new_app" "$app"');
+    expect(MAC_CURL_INSTALL_COMMAND).toContain('mv "$old_app" "$app"');
     expect(MAC_CURL_INSTALL_COMMAND).toContain('rm -rf "$new_app" 2>/dev/null || true');
     expect(MAC_CURL_INSTALL_COMMAND).toContain('" || { rm -rf " & newApp & "; exit 1; }');
     expect(MAC_CURL_INSTALL_COMMAND).toContain("xattr -d com.apple.quarantine");
