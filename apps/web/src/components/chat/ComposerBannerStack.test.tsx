@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./ComposerBannerStack";
+import { ComposerBanner } from "./ComposerBanner";
 
 const banner = (
   id: string,
@@ -45,6 +46,16 @@ describe("ComposerBannerStack", () => {
       <ComposerBannerStack items={[banner("front", "default"), banner("stacked", "warning")]} />,
     );
     expect(warningBehind).toContain("border-warning/24");
+  });
+
+  it("keeps routine info and success banners neutral", () => {
+    const info = renderToStaticMarkup(<ComposerBanner.Root variant="info" />);
+    const success = renderToStaticMarkup(<ComposerBanner.Root variant="success" />);
+
+    for (const markup of [info, success]) {
+      expect(markup).toContain("--chat-composer-attached-outline:var(--chat-composer-outline");
+      expect(markup).not.toContain("--chat-composer-attached-tint:color-mix");
+    }
   });
 
   it("does not render an expandable region for a single banner", () => {
