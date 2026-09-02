@@ -220,16 +220,13 @@ export function getProviderUpdateInitialToastView(input: {
   readonly updateProviders: ReadonlyArray<ProviderUpdateCandidate>;
   readonly oneClickProviders: ReadonlyArray<ProviderUpdateCandidate>;
 }): ProviderUpdateToastView {
-  const hasMultipleUpdates = input.updateProviders.length > 1;
   return {
     phase: "initial",
     type: "warning",
     title: getProviderUpdateInitialToastTitle(input.updateProviders),
     description:
       input.oneClickProviders.length > 0
-        ? hasMultipleUpdates
-          ? `Updates available for ${formatProviderList(input.updateProviders)}. Install now or review provider settings.`
-          : "Install the update now or review provider settings."
+        ? "Install the update now or review provider settings."
         : `${formatProviderList(input.updateProviders)} can be updated from provider settings.`,
   };
 }
