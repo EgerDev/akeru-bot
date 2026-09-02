@@ -59,17 +59,22 @@ prepared_app="$tmp/Akeru Bot (Alpha).app"
 ditto "$source_app" "$prepared_app"
 identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$prepared_app/Contents/Info.plist")"
 [ "$identifier" = dev.leodoes.akeru ]
+new_app="/Applications/.Akeru Bot (Alpha).app.installing.$$"
 install_app() {
-  rm -rf "$app" &&
+  rm -rf "$new_app" &&
+    [ ! -e "$new_app" ] &&
+    ditto "$prepared_app" "$new_app" &&
+    rm -rf "$app" &&
     [ ! -e "$app" ] &&
-    ditto "$prepared_app" "$app"
+    mv "$new_app" "$app"
 }
 if ! install_app 2>/dev/null; then
-  osascript - "$prepared_app" "$app" <<'APPLESCRIPT'
+  osascript - "$prepared_app" "$new_app" "$app" <<'APPLESCRIPT'
 on run argv
   set preparedApp to quoted form of item 1 of argv
-  set installedApp to quoted form of item 2 of argv
-  do shell script "rm -rf " & installedApp & " && test ! -e " & installedApp & " && ditto " & preparedApp & " " & installedApp with administrator privileges
+  set newApp to quoted form of item 2 of argv
+  set installedApp to quoted form of item 3 of argv
+  do shell script "rm -rf " & newApp & " && test ! -e " & newApp & " && ditto " & preparedApp & " " & newApp & " && rm -rf " & installedApp & " && test ! -e " & installedApp & " && mv " & newApp & " " & installedApp with administrator privileges
 end run
 APPLESCRIPT
 fi
