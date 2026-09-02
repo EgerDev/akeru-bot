@@ -49,12 +49,21 @@ describe("ComposerBannerStack", () => {
   });
 
   it("keeps routine info and success banners neutral", () => {
-    const info = renderToStaticMarkup(<ComposerBanner.Root variant="info" />);
-    const success = renderToStaticMarkup(<ComposerBanner.Root variant="success" />);
+    const infoRoot = renderToStaticMarkup(<ComposerBanner.Root variant="info" />);
+    const successRoot = renderToStaticMarkup(<ComposerBanner.Root variant="success" />);
 
-    for (const markup of [info, success]) {
+    for (const markup of [infoRoot, successRoot]) {
       expect(markup).toContain("--chat-composer-attached-outline:var(--chat-composer-outline");
       expect(markup).not.toContain("--chat-composer-attached-tint:color-mix");
+    }
+
+    for (const variant of ["info", "success"] as const) {
+      const stack = renderToStaticMarkup(
+        <ComposerBannerStack items={[banner(variant, variant)]} />,
+      );
+      expect(stack).toContain('data-variant="default"');
+      expect(stack).not.toContain(`border-${variant}/32`);
+      expect(stack).not.toContain(`bg-${variant}/4`);
     }
   });
 
