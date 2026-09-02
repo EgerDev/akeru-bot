@@ -63,7 +63,7 @@ new_app="/Applications/.Akeru Bot (Alpha).app.installing.$$"
 install_app() {
   rm -rf "$new_app" &&
     [ ! -e "$new_app" ] &&
-    ditto "$prepared_app" "$new_app" &&
+    { ditto "$prepared_app" "$new_app" || { rm -rf "$new_app"; return 1; }; } &&
     rm -rf "$app" &&
     [ ! -e "$app" ] &&
     mv "$new_app" "$app"
@@ -74,7 +74,7 @@ on run argv
   set preparedApp to quoted form of item 1 of argv
   set newApp to quoted form of item 2 of argv
   set installedApp to quoted form of item 3 of argv
-  do shell script "rm -rf " & newApp & " && test ! -e " & newApp & " && ditto " & preparedApp & " " & newApp & " && rm -rf " & installedApp & " && test ! -e " & installedApp & " && mv " & newApp & " " & installedApp with administrator privileges
+  do shell script "rm -rf " & newApp & " && test ! -e " & newApp & " && { ditto " & preparedApp & " " & newApp & " || { rm -rf " & newApp & "; exit 1; }; } && rm -rf " & installedApp & " && test ! -e " & installedApp & " && mv " & newApp & " " & installedApp with administrator privileges
 end run
 APPLESCRIPT
 fi
