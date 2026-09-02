@@ -1932,6 +1932,7 @@ describe("AgentControllerLive", () => {
       disconnect: vi.fn(async () => undefined),
       getTools: vi.fn(() => ({
         indexed_read: { mcp: { annotations: { readOnlyHint: true } } },
+        ask_user: { mcp: { annotations: {} } },
       })),
       getServerStatuses: vi.fn(() => []),
     };
@@ -1972,6 +1973,7 @@ describe("AgentControllerLive", () => {
         for (const [toolCallId, toolName, args] of [
           ["builtin-safe", "execute_command", { command: "bun test" }],
           ["indexed-read", "indexed_read", { query: "status" }],
+          ["connector-name-collision", "ask_user", { prompt: "Run connector action" }],
           ["missing-index", "new_mcp_tool", { value: "unknown" }],
         ] as const) {
           mastra.emit({
@@ -1992,6 +1994,10 @@ describe("AgentControllerLive", () => {
           decision: "approve",
         });
         expect(events.filter((event) => event.type === "request.opened")).toEqual([
+          expect.objectContaining({
+            requestId: "connector-name-collision",
+            payload: expect.objectContaining({ target: "ask_user" }),
+          }),
           expect.objectContaining({
             requestId: "missing-index",
             payload: expect.objectContaining({ target: "new_mcp_tool" }),
@@ -2075,6 +2081,227 @@ describe("AgentControllerLive", () => {
           });
         }
         yield* Fiber.interrupt(eventsFiber);
+      }),
+      bridge.service,
+      mastra.factory,
+    );
+  });
+
+  it.effect("approves question tools without showing an approval request", () => {
+    const bridge = makeBridge();
+    const mastra = makeMastraHarness();
+    return provideController(
+      Effect.gen(function* () {
+        const controller = yield* AgentController;
+        const events: ProviderRuntimeEvent[] = [];
+        const collector = yield* controller.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* resolveCodex(controller);
+        yield* controller.startSession(codexThreadId, {
+          threadId: codexThreadId,
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          cwd: process.cwd(),
+          modelSelection: codexSelection,
+          runtimeMode: "approval-required",
+        });
+        yield* controller.sendTurn({ threadId: codexThreadId, input: "Ask me a question." });
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "question-1",
+          toolName: "ask_user",
+          args: {
+            question: "Pick one.",
+            options: [{ label: "First", description: "Choose the first option" }],
+          },
+        } as AgentControllerEvent);
+        yield* Effect.yieldNow;
+
+        expect(mastra.session.respondToToolApproval).toHaveBeenCalledWith({
+          toolCallId: "question-1",
+          decision: "approve",
+        });
+        expect(events.some((event) => event.type === "request.opened")).toBe(false);
+
+        mastra.emit({
+          type: "tool_suspended",
+          toolCallId: "question-1",
+          toolName: "ask_user",
+          args: {},
+          suspendPayload: {
+            question: "Pick one.",
+            options: [{ label: "First", description: "Choose the first option" }],
+            selectionMode: "single_select",
+          },
+        } as AgentControllerEvent);
+        yield* Effect.yieldNow;
+
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "user-input.requested",
+            requestId: "question-1",
+            payload: expect.objectContaining({
+              questions: [
+                expect.objectContaining({
+                  question: "Pick one.",
+                  options: [{ label: "First", description: "Choose the first option" }],
+                }),
+              ],
+            }),
+          }),
+        );
+        yield* Fiber.interrupt(collector);
+      }),
+      bridge.service,
+      mastra.factory,
+    );
+  });
+
+  it.effect("auto review allows safe commands and asks before destructive commands", () => {
+    const bridge = makeBridge();
+    const mastra = makeMastraHarness();
+    return provideController(
+      Effect.gen(function* () {
+        const controller = yield* AgentController;
+        const events: ProviderRuntimeEvent[] = [];
+        const collector = yield* controller.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* resolveCodex(controller);
+        yield* controller.startSession(codexThreadId, {
+          threadId: codexThreadId,
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: codexInstanceId,
+          cwd: process.cwd(),
+          modelSelection: codexSelection,
+          runtimeMode: "auto",
+        });
+        yield* controller.sendTurn({ threadId: codexThreadId, input: "Inspect, then clean up." });
+
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "read-safe",
+          toolName: "execute_command",
+          args: { command: "pwd" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "delete-risky",
+          toolName: "execute_command",
+          args: { command: "rm -rf ./temporary-output" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "shred-risky",
+          toolName: "execute_command",
+          args: { command: "shred important-file" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "wrapped-shred-risky",
+          toolName: "execute_command",
+          args: { command: 'bash -c "shred -u important-file"' },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "command-shred-risky",
+          toolName: "execute_command",
+          args: { command: "command shred -u important-file" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "xargs-shred-risky",
+          toolName: "execute_command",
+          args: { command: "printf '%s\\n' important-file | xargs shred -u" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "xargs-rm-risky",
+          toolName: "execute_command",
+          args: { command: "printf '%s\\n' important-file | xargs rm -f" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "xargs-env-rm-risky",
+          toolName: "execute_command",
+          args: { command: "printf '%s\\n' important-file | xargs env rm -f" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "xargs-shell-rm-risky",
+          toolName: "execute_command",
+          args: { command: "printf '%s\\n' important-file | xargs sh -c 'rm -f \"$1\"' _" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "find-shred-risky",
+          toolName: "execute_command",
+          args: { command: "find . -name important-file -exec shred -u {} \\;" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "find-env-rm-risky",
+          toolName: "execute_command",
+          args: { command: "find . -name important-file -exec env rm -f {} \\;" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "dd-risky",
+          toolName: "execute_command",
+          args: { command: "dd if=/dev/zero of=important-file" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "redirected-dd-risky",
+          toolName: "execute_command",
+          args: { command: "dd if=/dev/zero > important-file" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "plain-move-risky",
+          toolName: "execute_command",
+          args: { command: "mv replacement important-file" },
+        } as AgentControllerEvent);
+        mastra.emit({
+          type: "tool_approval_required",
+          toolCallId: "forced-move-risky",
+          toolName: "execute_command",
+          args: { command: "mv -f replacement important-file" },
+        } as AgentControllerEvent);
+        yield* Effect.yieldNow;
+
+        expect(mastra.session.respondToToolApproval).toHaveBeenCalledWith({
+          toolCallId: "read-safe",
+          decision: "approve",
+        });
+        for (const requestId of [
+          "delete-risky",
+          "shred-risky",
+          "wrapped-shred-risky",
+          "command-shred-risky",
+          "xargs-shred-risky",
+          "xargs-rm-risky",
+          "xargs-env-rm-risky",
+          "xargs-shell-rm-risky",
+          "find-shred-risky",
+          "find-env-rm-risky",
+          "dd-risky",
+          "redirected-dd-risky",
+          "plain-move-risky",
+          "forced-move-risky",
+        ]) {
+          expect(mastra.session.respondToToolApproval).not.toHaveBeenCalledWith({
+            toolCallId: requestId,
+            decision: "approve",
+          });
+          expect(events).toContainEqual(
+            expect.objectContaining({ type: "request.opened", requestId }),
+          );
+        }
+        yield* Fiber.interrupt(collector);
       }),
       bridge.service,
       mastra.factory,

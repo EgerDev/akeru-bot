@@ -687,6 +687,21 @@ const CRITICAL_SHELL_ACTIONS: ReadonlyArray<readonly [AkeruCriticalAction, RegEx
     "delete",
     /(?:^|[;&|]\s*)(?:sudo\s+)?(?:rm|rmdir|unlink)\b|\b(?:drop|truncate)\s+(?:database|schema|table)\b|\bdelete\s+from\b/i,
   ],
+  ["delete", /(?:^|[;&|]\s*)(?:(?:sudo|command|builtin|exec|nohup)\s+)*shred\b/i],
+  [
+    "delete",
+    /(?:^|[;&|]\s*)(?:(?:sudo|command|builtin|exec|nohup)\s+)*dd\b[^\n;&|]*(?:\sof=(?:"[^"]*"|'[^']*'|[^\s;&|]+)|\s1?>>?\s*[^\s;&|]+)/i,
+  ],
+  ["delete", /(?:^|[;&|]\s*)(?:(?:sudo|command|builtin|exec|nohup)\s+)*mv\b/i],
+  ["delete", /(?:^|[;&|]\s*)git\s+(?:reset\s+--hard|clean\s+-[a-z]*[fdx][a-z]*)\b/i],
+  [
+    "delete",
+    /\bfind\b[^\n;&|]*\s-exec(?:dir)?\s+(?:(?:sudo|command|builtin|exec|nohup|env)\s+)*(?:rm|rmdir|shred|unlink)\b/i,
+  ],
+  [
+    "delete",
+    /\bxargs\b[^\n;&|]*\s(?:(?:sudo|command|builtin|exec|nohup)\s+)*(?:rm|rmdir|shred|unlink)\b/i,
+  ],
   ["publish", /(?:^|[;&|]\s*)git\s+push\b/i],
   [
     "production",
@@ -700,6 +715,10 @@ const CRITICAL_SHELL_ACTIONS: ReadonlyArray<readonly [AkeruCriticalAction, RegEx
     "send",
     /(?:^|[;&|]\s*)(?:(?:mail|mailx)\b|curl\b[^\n;&|]*(?:--data(?:-raw|-binary)?|-d\b|--form|-F\b|--request\s+post|-X\s*post))/i,
   ],
+];
+const SHELL_COMMAND_WRAPPER_PATTERNS = [
+  /(?:^|[;&|]\s*)(?:(?:sudo|command|builtin|exec|nohup)\s+)*(?:\/(?:usr\/)?bin\/)?(?:ba|da|z)?sh\s+-[a-z]*c[a-z]*\s+(?:"((?:\\.|[^"])*)"|'([^']*)'|([^\s;&|]+))/gi,
+  /(?:\bxargs\b[^\n;&|]*?\s+|\bfind\b[^\n;&|]*\s-exec(?:dir)?\s+)(?:(?:sudo|command|builtin|exec|nohup)\s+)*(?:\/(?:usr\/)?bin\/)?(?:ba|da|z)?sh\s+-[a-z]*c[a-z]*\s+(?:"((?:\\.|[^"])*)"|'([^']*)'|([^\s;&|]+))/gi,
 ];
 
 function textTokens(value: string): ReadonlySet<string> {
@@ -727,9 +746,22 @@ function criticalActionFromText(value: string): AkeruCriticalAction | null {
   return null;
 }
 
-function criticalActionFromShellCommand(value: string): AkeruCriticalAction | null {
+function criticalActionFromShellCommand(
+  value: string,
+  wrapperDepth = 0,
+): AkeruCriticalAction | null {
   for (const [action, pattern] of CRITICAL_SHELL_ACTIONS) {
     if (pattern.test(value)) return action;
+  }
+  if (wrapperDepth < 5) {
+    for (const wrapperPattern of SHELL_COMMAND_WRAPPER_PATTERNS) {
+      for (const match of value.matchAll(wrapperPattern)) {
+        const nestedCommand = match[1] ?? match[2] ?? match[3];
+        if (!nestedCommand) continue;
+        const action = criticalActionFromShellCommand(nestedCommand, wrapperDepth + 1);
+        if (action) return action;
+      }
+    }
   }
   return criticalActionFromText(value);
 }
